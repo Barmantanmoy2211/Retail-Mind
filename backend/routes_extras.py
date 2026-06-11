@@ -51,7 +51,10 @@ async def health_score(
 
     outlets = []
     if outlet_id:
-        o = await db.outlets.find_one({"_id": ObjectId(outlet_id), "business_id": biz_id})
+        try:
+            o = await db.outlets.find_one({"_id": ObjectId(outlet_id), "business_id": biz_id})
+        except Exception:
+            raise HTTPException(400, "Invalid outlet_id")
         if o:
             outlets = [o]
     else:
