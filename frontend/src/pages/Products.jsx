@@ -8,12 +8,13 @@ import { Label } from "@/components/ui/label";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import { Search, Plus, Pencil, Trash2, Package } from "lucide-react";
+import { Search, Plus, Pencil, Trash2, Package, Download } from "lucide-react";
 import { toast } from "sonner";
+import ImageUpload from "@/components/ImageUpload";
 
 const empty = {
   name: "", sku: "", barcode: "", category: "", cost_price: "", selling_price: "",
-  tax_percent: "", reward_points: "0", min_stock: "10", unit: "pcs",
+  tax_percent: "", reward_points: "0", min_stock: "10", unit: "pcs", image_url: "",
 };
 
 export default function Products() {
@@ -41,6 +42,7 @@ export default function Products() {
       category: p.category || "", cost_price: p.cost_price || "",
       selling_price: p.selling_price || "", tax_percent: p.tax_percent || "",
       reward_points: p.reward_points || 0, min_stock: p.min_stock || 0, unit: p.unit || "pcs",
+      image_url: p.image_url || "",
     });
     setShowDialog(true);
   };
@@ -77,7 +79,21 @@ export default function Products() {
       <PageHeader
         title="Products"
         description={`${items.length} products in your catalog.`}
-        actions={canEdit ? <Button onClick={openNew} data-testid="prod-new-btn"><Plus size={14} className="mr-1.5" />Add Product</Button> : null}
+        actions={
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={async () => {
+              const token = localStorage.getItem("token");
+              const url = `${process.env.REACT_APP_BACKEND_URL}/api/exports/products.xlsx`;
+              const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+              const blob = await res.blob();
+              const a = document.createElement("a");
+              a.href = URL.createObjectURL(blob);
+              a.download = `products-${Date.now()}.xlsx`;
+              a.click();
+            }} data-testid="prod-export"><Download size={14} className="mr-1.5" />Excel</Button>
+            {canEdit && <Button onClick={openNew} data-testid="prod-new-btn"><Plus size={14} className="mr-1.5" />Add Product</Button>}
+          </div>
+        }
       />
 
       <div className="relative max-w-md">
@@ -106,9 +122,13 @@ export default function Products() {
                 <tr key={p.id} className="border-b border-border/50 hover:bg-secondary/20" data-testid={`prod-row-${p.id}`}>
                   <td className="p-4">
                     <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-md bg-primary/10 text-primary flex items-center justify-center font-display font-bold">
-                        {p.name[0]}
-                      </div>
+                      {p.image_url ? (
+                        <img src={p.image_url} alt="" className="w-9 h-9 rounded-md object-cover" />
+                      ) : (
+                        <div className="w-9 h-9 rounded-md bg-primary/10 text-primary flex items-center justify-center font-display font-bold">
+                          {p.name[0]}
+                        </div>
+                      )}
                       <div>
                         <div className="font-medium">{p.name}</div>
                         <div className="text-xs text-muted-foreground font-mono">SKU: {p.sku} · {p.barcode || "—"}</div>
@@ -141,6 +161,10 @@ export default function Products() {
         <DialogContent className="max-w-2xl">
           <DialogHeader><DialogTitle>{editing ? "Edit" : "New"} Product</DialogTitle></DialogHeader>
           <div className="grid grid-cols-2 gap-3">
+            <div className="col-span-2">
+              <Label>Image</Label>
+              <div className="mt-1.5"><ImageUpload value={form.image_url} onChange={(v) => setForm({ ...form, image_url: v })} folder="products" /></div>
+            </div>
             <div className="col-span-2"><Label>Name *</Label><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} data-testid="prod-name" /></div>
             <div><Label>SKU *</Label><Input value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })} data-testid="prod-sku" /></div>
             <div><Label>Barcode</Label><Input value={form.barcode} onChange={(e) => setForm({ ...form, barcode: e.target.value })} data-testid="prod-barcode" /></div>

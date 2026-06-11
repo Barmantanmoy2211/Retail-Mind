@@ -15,6 +15,7 @@ import {
 } from "recharts";
 import { Phase2Banner } from "@/components/SharedUI";
 import { TrendingUp, Wallet, Receipt, Boxes, Download } from "lucide-react";
+import HealthScoreView from "@/pages/HealthScore";
 
 const COLORS = ["#0055FF", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6"];
 
@@ -40,6 +41,19 @@ export default function Reports() {
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = `${name}-${Date.now()}.csv`;
+    a.click();
+  };
+
+  const exportXlsx = async (endpoint, name) => {
+    const token = localStorage.getItem("token");
+    const res = await fetch(`${process.env.REACT_APP_BACKEND_URL}${endpoint}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return;
+    const blob = await res.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${name}-${Date.now()}.xlsx`;
     a.click();
   };
 
@@ -167,7 +181,7 @@ export default function Reports() {
         </TabsContent>
 
         <TabsContent value="health" className="mt-6">
-          <Phase2Banner feature="AI Outlet Health Score" />
+          <HealthScoreView embedded />
         </TabsContent>
       </Tabs>
     </div>

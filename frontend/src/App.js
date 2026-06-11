@@ -25,6 +25,7 @@ import Expenses from "@/pages/Expenses";
 import Rewards from "@/pages/Rewards";
 import Taxes from "@/pages/Taxes";
 import Reports from "@/pages/Reports";
+import HealthScore from "@/pages/HealthScore";
 import AuditLogs from "@/pages/AuditLogs";
 import Settings from "@/pages/Settings";
 
@@ -84,6 +85,7 @@ function App() {
             <Route path="/rewards" element={<ProtectedRoute roles={["business_admin"]}><Rewards /></ProtectedRoute>} />
             <Route path="/taxes" element={<ProtectedRoute roles={["business_admin"]}><Taxes /></ProtectedRoute>} />
             <Route path="/reports" element={<ProtectedRoute roles={["business_admin", "outlet_manager"]}><Reports /></ProtectedRoute>} />
+            <Route path="/health-score" element={<ProtectedRoute roles={["business_admin", "outlet_manager"]}><HealthScore /></ProtectedRoute>} />
             <Route path="/audit" element={<ProtectedRoute roles={["business_admin"]}><AuditLogs /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute roles={["business_admin"]}><Settings /></ProtectedRoute>} />
           </Routes>

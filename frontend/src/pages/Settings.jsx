@@ -105,9 +105,18 @@ export default function Settings() {
         <TabsContent value="integrations" className="mt-6 space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Phase2Banner feature="WhatsApp Cloud API" />
-            <Phase2Banner feature="AWS S3 File Uploads" />
             <Phase2Banner feature="PDF Invoice Generation" />
-            <Phase2Banner feature="AI Outlet Health Score" />
+          </div>
+          <div className="card-modern p-6 bg-success/5 border-success/30">
+            <div className="flex items-start gap-3">
+              <Sparkles className="text-success mt-0.5" size={20} />
+              <div>
+                <h3 className="font-display font-semibold">Now live ✨</h3>
+                <p className="text-sm text-muted-foreground mt-1">
+                  AI Outlet Health Score · AWS S3 product image uploads · Excel exports · Command palette (Cmd/Ctrl + K)
+                </p>
+              </div>
+            </div>
           </div>
         </TabsContent>
       </Tabs>

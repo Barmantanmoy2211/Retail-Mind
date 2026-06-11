@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
-import { Search, Eye } from "lucide-react";
+import { Search, Eye, Download } from "lucide-react";
 
 export default function Bills() {
   const { business } = useAuth();
@@ -23,7 +23,19 @@ export default function Bills() {
 
   return (
     <div className="space-y-6 animate-fade-up">
-      <PageHeader title="Bills & Invoices" description={`${bills.length} bills in last 30 days.`} />
+      <PageHeader title="Bills & Invoices" description={`${bills.length} bills in last 30 days.`}
+        actions={
+          <Button variant="outline" onClick={async () => {
+            const token = localStorage.getItem("token");
+            const res = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/exports/bills.xlsx?days=30`, { headers: { Authorization: `Bearer ${token}` } });
+            const blob = await res.blob();
+            const a = document.createElement("a");
+            a.href = URL.createObjectURL(blob);
+            a.download = `bills-${Date.now()}.xlsx`;
+            a.click();
+          }} data-testid="bills-export"><Download size={14} className="mr-1.5" />Excel</Button>
+        }
+      />
 
       <div className="relative max-w-md">
         <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />

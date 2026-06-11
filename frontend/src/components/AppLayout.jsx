@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
@@ -7,13 +7,14 @@ import {
   LayoutDashboard, Store, Package, Users, ShoppingCart, FileText,
   TrendingUp, Settings, LogOut, Moon, Sun, ChevronLeft, ChevronRight,
   Truck, Receipt, Award, Wallet, Building2, ScrollText, Boxes, Tag,
-  ShieldCheck, Bell, Menu, X, Sparkles,
+  ShieldCheck, Bell, Menu, X, Sparkles, Search, Command as CmdIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuTrigger, DropdownMenuSeparator, DropdownMenuLabel,
 } from "@/components/ui/dropdown-menu";
+import CommandPalette from "@/components/CommandPalette";
 
 const platformNav = [
   { to: "/platform", label: "Overview", icon: LayoutDashboard },
@@ -36,6 +37,7 @@ const businessNav = [
   { to: "/outlets", label: "Outlets", icon: Store },
   { to: "/staff", label: "Staff & Roles", icon: Users },
   { to: "/reports", label: "Reports", icon: TrendingUp },
+  { to: "/health-score", label: "Health Score", icon: Sparkles },
   { to: "/audit", label: "Audit Logs", icon: ScrollText },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
@@ -64,6 +66,18 @@ export default function AppLayout({ children }) {
   const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [cmdOpen, setCmdOpen] = useState(false);
+
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setCmdOpen((o) => !o);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const nav =
     user?.role === "platform_admin" ? platformNav :
@@ -170,6 +184,15 @@ export default function AppLayout({ children }) {
           </div>
           <div className="flex items-center gap-2">
             <button
+              onClick={() => setCmdOpen(true)}
+              data-testid="cmd-trigger"
+              className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-secondary hover:bg-muted rounded-lg text-sm text-muted-foreground"
+            >
+              <Search size={14} />
+              <span className="text-xs">Search...</span>
+              <kbd className="ml-1 text-[10px] font-mono px-1.5 py-0.5 bg-background border border-border rounded">⌘K</kbd>
+            </button>
+            <button
               onClick={toggle}
               data-testid="theme-toggle"
               className="p-2 hover:bg-secondary rounded-lg text-muted-foreground"
@@ -206,6 +229,7 @@ export default function AppLayout({ children }) {
           {children}
         </main>
       </div>
+      <CommandPalette open={cmdOpen} onOpenChange={setCmdOpen} />
     </div>
   );
 }

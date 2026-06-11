@@ -411,3 +411,176 @@ def test_tenant_isolation_products(session, tokens):
     # New biz should have no products/customers
     assert products_new == []
     assert cust_new == []
+
+
+# ============================================================
+# Phase 1.5 — Health Score, Excel Exports, S3 Upload skeleton
+# ============================================================
+import io
+from openpyxl import load_workbook
+
+
+# ---------- Health Score ----------
+class TestHealthScore:
+    def test_health_score_returns_outlets_with_metrics(self, tokens):
+        c = _client(tokens["business_admin"]["access_token"])
+        r = c.get(f"{API}/health-score", timeout=60)
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert "outlets" in data
+        outlets = data["outlets"]
+        assert len(outlets) >= 1, "Expected at least 1 outlet"
+        # Sorted descending by score
+        scores = [o["score"] for o in outlets]
+        assert scores == sorted(scores, reverse=True), "Outlets must be sorted by score desc"
+
+        required_metrics = {
+            "sales_growth", "profit_margin", "customer_growth",
+            "inventory_health", "expense_control", "tax_compliance",
+            "reward_engagement",
+        }
+        valid_statuses = {"Excellent", "Good", "Needs Attention", "Critical"}
+
+        for o in outlets:
+            for k in ["outlet_id", "outlet_name", "score", "status",
+                      "metrics", "recommendations", "revenue_30d", "profit_30d"]:
+                assert k in o, f"missing key {k} in outlet result"
+            assert o["status"] in valid_statuses, f"invalid status: {o['status']}"
+            assert 0 <= o["score"] <= 100, f"score out of range: {o['score']}"
+            assert set(o["metrics"].keys()) >= required_metrics, \
+                f"missing metrics: {required_metrics - set(o['metrics'].keys())}"
+            assert isinstance(o["recommendations"], list) and len(o["recommendations"]) >= 1
+
+    def test_health_score_outlet_manager_scoped(self, tokens):
+        c = _client(tokens["outlet_manager"]["access_token"])
+        r = c.get(f"{API}/health-score", timeout=60)
+        # Should succeed (manager has business_scope) - returns at least the assigned outlet
+        assert r.status_code == 200, r.text
+        assert "outlets" in r.json()
+
+    def test_health_score_unauthorized(self, session):
+        r = session.get(f"{API}/health-score")
+        assert r.status_code == 401
+
+
+# ---------- Excel Exports ----------
+XLSX_MEDIA = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def _assert_xlsx(resp, expected_filename_part):
+    assert resp.status_code == 200, resp.text[:300]
+    assert XLSX_MEDIA in resp.headers.get("content-type", ""), \
+        f"Wrong content-type: {resp.headers.get('content-type')}"
+    cd = resp.headers.get("content-disposition", "")
+    assert "attachment" in cd.lower(), f"Missing attachment in: {cd}"
+    assert expected_filename_part in cd, f"Expected '{expected_filename_part}' in CD: {cd}"
+    # Verify body is a valid XLSX (load via openpyxl)
+    wb = load_workbook(io.BytesIO(resp.content))
+    return wb
+
+
+class TestExcelExports:
+    def test_export_bills_xlsx(self, tokens):
+        c = _client(tokens["business_admin"]["access_token"])
+        # Use raw requests to keep bytes
+        r = requests.get(
+            f"{API}/exports/bills.xlsx",
+            headers={"Authorization": f"Bearer {tokens['business_admin']['access_token']}"},
+            timeout=60,
+        )
+        wb = _assert_xlsx(r, "bills-")
+        assert "Bills" in wb.sheetnames
+        ws = wb["Bills"]
+        headers = [c.value for c in ws[1]]
+        for h in ["Bill No", "Date", "Customer", "Total"]:
+            assert h in headers, f"missing column {h}"
+
+    def test_export_products_xlsx(self, tokens):
+        r = requests.get(
+            f"{API}/exports/products.xlsx",
+            headers={"Authorization": f"Bearer {tokens['business_admin']['access_token']}"},
+            timeout=60,
+        )
+        wb = _assert_xlsx(r, "products-")
+        assert "Products" in wb.sheetnames
+        # Demo data: 20 products → at least header + 1 row
+        assert wb["Products"].max_row >= 2
+
+    def test_export_customers_xlsx(self, tokens):
+        r = requests.get(
+            f"{API}/exports/customers.xlsx",
+            headers={"Authorization": f"Bearer {tokens['business_admin']['access_token']}"},
+            timeout=60,
+        )
+        wb = _assert_xlsx(r, "customers-")
+        assert "Customers" in wb.sheetnames
+
+    def test_export_profit_loss_xlsx_monthly(self, tokens):
+        r = requests.get(
+            f"{API}/exports/profit-loss.xlsx",
+            params={"period": "monthly"},
+            headers={"Authorization": f"Bearer {tokens['business_admin']['access_token']}"},
+            timeout=60,
+        )
+        wb = _assert_xlsx(r, "profit-loss-monthly-")
+        # Two sheets: P&L + Expenses by Category
+        assert "P&L" in wb.sheetnames
+        assert "Expenses by Category" in wb.sheetnames
+
+    def test_export_unauthorized(self, session):
+        r = session.get(f"{API}/exports/bills.xlsx")
+        assert r.status_code == 401
+
+
+# ---------- Uploads (S3 not configured branch) ----------
+class TestUploads:
+    def test_uploads_status_not_configured(self, tokens):
+        c = _client(tokens["business_admin"]["access_token"])
+        r = c.get(f"{API}/uploads/status")
+        assert r.status_code == 200
+        assert r.json() == {"s3_configured": False}, r.json()
+
+    def test_upload_image_returns_503_when_s3_not_configured(self, tokens):
+        # Tiny valid PNG (1x1)
+        png_bytes = (
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+            b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\x9cc\xf8\xcf"
+            b"\xc0\x00\x00\x00\x03\x00\x01\xa0\x18\xe8\xd9\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+        r = requests.post(
+            f"{API}/uploads/image",
+            headers={"Authorization": f"Bearer {tokens['business_admin']['access_token']}"},
+            files={"file": ("test.png", png_bytes, "image/png")},
+            timeout=30,
+        )
+        assert r.status_code == 503, f"Expected 503, got {r.status_code}: {r.text}"
+        body = r.json()
+        detail = body.get("detail", "")
+        assert "S3 not configured" in detail or "s3" in detail.lower(), \
+            f"Detail does not mention S3: {detail}"
+
+    def test_upload_image_rejects_non_image_content_type(self, tokens):
+        r = requests.post(
+            f"{API}/uploads/image",
+            headers={"Authorization": f"Bearer {tokens['business_admin']['access_token']}"},
+            files={"file": ("test.txt", b"hello world", "text/plain")},
+            timeout=30,
+        )
+        assert r.status_code == 400, f"Expected 400, got {r.status_code}: {r.text}"
+
+    def test_upload_image_rejects_oversize(self, tokens):
+        # 6 MB of image-typed bytes
+        big = b"\x89PNG\r\n\x1a\n" + (b"A" * (6 * 1024 * 1024))
+        r = requests.post(
+            f"{API}/uploads/image",
+            headers={"Authorization": f"Bearer {tokens['business_admin']['access_token']}"},
+            files={"file": ("big.png", big, "image/png")},
+            timeout=60,
+        )
+        assert r.status_code == 400, f"Expected 400 for oversize, got {r.status_code}"
+        assert "5MB" in r.text or "size" in r.text.lower()
+
+    def test_upload_image_requires_auth(self, session):
+        r = session.post(f"{API}/uploads/image")
+        assert r.status_code == 401
+

@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import { Search, Plus, Eye, Phone, Mail, Award } from "lucide-react";
+import { Search, Plus, Eye, Phone, Mail, Award, Download } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Customers() {
@@ -56,7 +56,20 @@ export default function Customers() {
       <PageHeader
         title="Customers"
         description={`${items.length} customers in your CRM.`}
-        actions={<Button onClick={() => setShowDialog(true)} data-testid="cust-new"><Plus size={14} className="mr-1.5" />Add Customer</Button>}
+        actions={
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={async () => {
+              const token = localStorage.getItem("token");
+              const res = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/exports/customers.xlsx`, { headers: { Authorization: `Bearer ${token}` } });
+              const blob = await res.blob();
+              const a = document.createElement("a");
+              a.href = URL.createObjectURL(blob);
+              a.download = `customers-${Date.now()}.xlsx`;
+              a.click();
+            }} data-testid="cust-export"><Download size={14} className="mr-1.5" />Excel</Button>
+            <Button onClick={() => setShowDialog(true)} data-testid="cust-new"><Plus size={14} className="mr-1.5" />Add Customer</Button>
+          </div>
+        }
       />
 
       <div className="relative max-w-md">
