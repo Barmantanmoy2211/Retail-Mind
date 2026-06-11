@@ -1,0 +1,141 @@
+{
+  "theme": "Swiss & High-Contrast (Archetype 4)",
+  "mode": "light_and_dark",
+  "global_design_rules": [
+    "No Inter font, Roboto, or Open Sans. Use the defined premium typography.",
+    "No purple or teal gradients. Use stark monochrome with a signal accent.",
+    "Containers with borders must have generous internal padding (p-6/p-8) to prevent collision.",
+    "Hover states must be explicitly styled and tested for accessible contrast.",
+    "Include data-testid on all interactive elements (e.g., data-testid='login-button').",
+    "Use optical alignment and generous negative space (Tailwind p-8 to p-12)."
+  ],
+  "typography": {
+    "fonts": {
+      "heading": "'Cabinet Grotesk', sans-serif",
+      "body": "'Manrope', sans-serif",
+      "mono": "'JetBrains Mono', monospace"
+    },
+    "hierarchy": {
+      "h1": "text-4xl sm:text-5xl lg:text-6xl tracking-tight leading-none font-bold",
+      "h2": "text-2xl sm:text-3xl lg:text-4xl tracking-tight leading-tight font-semibold",
+      "h3": "text-xl sm:text-2xl tracking-tight leading-snug font-medium",
+      "h4": "text-lg sm:text-xl font-medium",
+      "body": "text-base leading-relaxed",
+      "small_label": "text-xs uppercase tracking-[0.2em] font-semibold"
+    },
+    "font_setup_instructions": "Add Cabinet Grotesk (via Fontshare or local assets) and Manrope (Google Fonts) in index.html or global CSS. Set Manrope as the default sans family in Tailwind config."
+  },
+  "colors": {
+    "light": {
+      "background": "#FAFAFA",
+      "surface": "#FFFFFF",
+      "primary": "#0055FF",
+      "primary_hover": "#0044CC",
+      "text_primary": "#0A0A0A",
+      "text_secondary": "#52525B",
+      "border": "#E5E5E5",
+      "success": "#10B981",
+      "warning": "#F59E0B",
+      "error": "#EF4444"
+    },
+    "dark": {
+      "background": "#09090B",
+      "surface": "#141417",
+      "primary": "#3B82F6",
+      "primary_hover": "#60A5FA",
+      "text_primary": "#FAFAFA",
+      "text_secondary": "#A1A1AA",
+      "border": "#27272A",
+      "success": "#10B981",
+      "warning": "#F59E0B",
+      "error": "#EF4444"
+    }
+  },
+  "surfaces": {
+    "glassmorphism": "backdrop-blur-xl bg-white/70 dark:bg-black/60 border border-white/20 dark:border-white/10 shadow-sm",
+    "modern_cards": "bg-surface border border-border rounded-xl shadow-sm hover:shadow-md transition-shadow duration-200",
+    "bento_grid": "grid gap-6 grid-cols-1 md:grid-cols-3 lg:grid-cols-4"
+  },
+  "components": {
+    "buttons": {
+      "primary": "bg-primary text-white hover:bg-primary_hover rounded-lg px-6 py-2.5 font-medium transition-colors shadow-sm",
+      "secondary": "bg-surface border border-border text-text_primary hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg px-6 py-2.5 font-medium transition-colors",
+      "ghost": "text-text_secondary hover:text-text_primary hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg px-4 py-2 transition-colors"
+    },
+    "inputs": "bg-surface border border-border rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none text-text_primary placeholder:text-text_secondary/50",
+    "tables": "w-full text-left border-collapse",
+    "table_header": "text-xs uppercase tracking-wider text-text_secondary font-semibold border-b border-border p-4",
+    "table_cell": "p-4 border-b border-border/50 text-sm align-middle",
+    "badge": "px-2.5 py-0.5 rounded-full text-xs font-medium border"
+  },
+  "layout_patterns": {
+    "dashboard_container": "flex h-screen bg-background overflow-hidden",
+    "sidebar": "w-64 flex-shrink-0 border-r border-border bg-surface flex flex-col transition-all duration-300",
+    "sidebar_collapsed": "w-20",
+    "main_content": "flex-1 flex flex-col overflow-hidden",
+    "header": "h-16 border-b border-border bg-surface/80 backdrop-blur-md flex items-center justify-between px-6 z-10",
+    "page_content": "flex-1 overflow-auto p-6 md:p-8"
+  },
+  "page_guidelines": {
+    "landing_page": {
+      "strategy": "Marketing mode. High visual impact. Use the 'Swiss Grid' and overlapping elements.",
+      "hero": "H1 large (text-6xl), text left-aligned, prominent primary CTA + secondary 'View Demo' ghost button. Abstract geometric background in subtle opacity.",
+      "features": "Bento grid layout (grid-cols-1 md:grid-cols-12) with varying card spans. Use generous padding."
+    },
+    "login_register": {
+      "strategy": "Minimalist centered card layout. Glassmorphism effect over a very subtle geometric background. Strict 1px borders.",
+      "components": "Shadcn/UI heavily customized inputs and forms. Focus states must pop."
+    },
+    "platform_admin_dashboard": {
+      "strategy": "Control Room Grid (Dense). Top-left 'North Star' metrics (Total Tenants, MRR).",
+      "layout": "Data tables for pending approvals. Top-row KPI cards."
+    },
+    "business_dashboard": {
+      "strategy": "Focus on Sales Trend (Recharts area chart) and Outlet Health Score.",
+      "layout": "KPI strip (4 columns) -> Main Chart (col-span-3) + Activity Feed (col-span-1) -> Tables below."
+    },
+    "outlet_manager_dashboard": {
+      "strategy": "Action-oriented. Quick access to Inventory Alerts and Expense Approvals."
+    },
+    "pos_billing_screen": {
+      "strategy": "Functional minimalism. High contrast, large tap targets, keyboard shortcut hints visible.",
+      "layout": "Left 65%: Product grid (or barcode input focus) + Category filters. Right 35%: Cart, totals, tax breakdown, massive 'Pay' button."
+    }
+  },
+  "icons_and_assets": {
+    "library": "lucide-react",
+    "installation": "yarn add lucide-react",
+    "images": {
+      "hero_background_dark": {
+        "url": "https://images.unsplash.com/photo-1709626011485-6fe000ea2dbc?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA3MDB8MHwxfHNlYXJjaHwyfHxhYnN0cmFjdCUyMGdlb21ldHJpYyUyMHRlY2hub2xvZ3klMjBiYWNrZ3JvdW5kfGVufDB8fHx8MTc4MTE2MjEzMHww&ixlib=rb-4.1.0&q=85",
+        "description": "Abstract geometric technology background for dark mode hero/login sections."
+      },
+      "hero_background_light": {
+        "url": "https://images.unsplash.com/photo-1657371551739-0a5561756121?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA3MDB8MHwxfHNlYXJjaHwzfHxhYnN0cmFjdCUyMGdlb21ldHJpYyUyMHRlY2hub2xvZ3klMjBiYWNrZ3JvdW5kfGVufDB8fHx8MTc4MTE2MjEzMHww&ixlib=rb-4.1.0&q=85",
+        "description": "Clean light geometric background for light mode hero/login sections."
+      },
+      "modern_retail_store": {
+        "url": "https://images.unsplash.com/photo-1633550233861-edf516679c90?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA3MDR8MHwxfHNlYXJjaHw0fHxtb2Rlcm4lMjByZXRhaWwlMjBzdG9yZSUyMGludGVyaW9yfGVufDB8fHx8MTc4MTE2MjEzMHww&ixlib=rb-4.1.0&q=85",
+        "description": "Modern retail store interior for landing page testimonials or feature sections."
+      },
+      "retail_clothing_display": {
+        "url": "https://images.unsplash.com/photo-1637666544359-0e88de7b3206?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA3MDR8MHwxfHNlYXJjaHwzfHxtb2Rlcm4lMjByZXRhaWwlMjBzdG9yZSUyMGludGVyaW9yfGVufDB8fHx8MTc4MTE2MjEzMHww&ixlib=rb-4.1.0&q=85",
+        "description": "Retail display for e-commerce or multi-outlet feature sections."
+      }
+    }
+  },
+  "animation_and_motion": {
+    "strategy": "Purposeful motion. Snappy transitions (duration-200 to 300).",
+    "hover": "Subtle translate-y (-1px) and shadow increase on cards. Color fade on buttons.",
+    "page_transitions": "Fade-in and slight slide-up (10px) using Framer Motion.",
+    "drawer_mobile": "Slide-up from bottom with backdrop blur."
+  },
+  "instructions_to_main_agent": [
+    "Strictly follow the color tokens for Tailwind. Map them in tailwind.config.js.",
+    "Do NOT use 'Inter'. Add 'Cabinet Grotesk' and 'Manrope'.",
+    "Ensure all buttons, inputs, and links have 'data-testid' attributes (e.g. data-testid='pos-pay-button').",
+    "Use pure HTML/Tailwind for Landing Page complex layouts, use customized Shadcn/UI for Dashboard/App elements.",
+    "Never use empty white/black backgrounds without a subtle tint or border structure.",
+    "Make POS screen mobile/tablet responsive, adapting right panel to a bottom sheet or drawer on small screens."
+  ]
+}
