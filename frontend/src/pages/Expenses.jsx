@@ -31,20 +31,28 @@ export default function Expenses() {
   const [showDialog, setShowDialog] = useState(false);
   const [form, setForm] = useState({ category: "operations", subcategory: "rent", amount: "", description: "", outlet_id: "" });
 
+  const isOutletManager = user?.role === "outlet_manager";
+
   const load = async () => {
     const f = filter === "all" ? "" : `?status=${filter}`;
     const [e, o] = await Promise.all([api.get(`/expenses${f}`), api.get("/outlets")]);
     setItems(e.data);
     setOutlets(o.data);
+    if (isOutletManager && user?.outlet_id) {
+      setForm((prev) => ({ ...prev, outlet_id: user.outlet_id }));
+    }
   };
   useEffect(() => { load(); }, [filter]);
 
   const save = async () => {
     try {
       await api.post("/expenses", { ...form, amount: Number(form.amount) });
-      toast.success("Expense added");
+      toast.success(isOutletManager ? "Expense submitted for approval" : "Expense added");
       setShowDialog(false);
-      setForm({ category: "operations", subcategory: "rent", amount: "", description: "", outlet_id: "" });
+      setForm({
+        category: "operations", subcategory: "rent", amount: "", description: "",
+        outlet_id: isOutletManager ? user?.outlet_id : "",
+      });
       load();
     } catch (e) {
       toast.error("Failed");
@@ -64,7 +72,11 @@ export default function Expenses() {
     <div className="space-y-6 animate-fade-up">
       <PageHeader
         title="Expenses"
-        description={`${formatCurrency(total, currency)} approved expenses`}
+        description={
+          isOutletManager
+            ? "Expenses for your outlet — pending items need business owner approval."
+            : `${formatCurrency(total, currency)} approved expenses`
+        }
         actions={<Button onClick={() => setShowDialog(true)} data-testid="exp-new"><Plus size={14} className="mr-1.5" />Add Expense</Button>}
       />
 
@@ -142,10 +154,14 @@ export default function Expenses() {
             </div>
             <div>
               <Label>Outlet</Label>
-              <Select value={form.outlet_id} onValueChange={(v) => setForm({ ...form, outlet_id: v })}>
-                <SelectTrigger data-testid="exp-outlet"><SelectValue placeholder="Select" /></SelectTrigger>
-                <SelectContent>{outlets.map(o => <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>)}</SelectContent>
-              </Select>
+              {isOutletManager ? (
+                <Input value={outlets.find((o) => o.id === form.outlet_id)?.name || "Your outlet"} disabled />
+              ) : (
+                <Select value={form.outlet_id} onValueChange={(v) => setForm({ ...form, outlet_id: v })}>
+                  <SelectTrigger data-testid="exp-outlet"><SelectValue placeholder="Select" /></SelectTrigger>
+                  <SelectContent>{outlets.map((o) => <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>)}</SelectContent>
+                </Select>
+              )}
             </div>
             <div><Label>Amount</Label><Input type="number" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} data-testid="exp-amt" /></div>
             <div><Label>Description</Label><Input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} data-testid="exp-desc" /></div>

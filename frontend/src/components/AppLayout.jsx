@@ -61,7 +61,7 @@ const cashierNav = [
 ];
 
 export default function AppLayout({ children }) {
-  const { user, business, logout } = useAuth();
+  const { user, business, outlet, logout } = useAuth();
   const { theme, toggle } = useTheme();
   const location = useLocation();
   const navigate = useNavigate();
@@ -87,6 +87,13 @@ export default function AppLayout({ children }) {
 
   const initials = (user?.name || "U")
     .split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase();
+
+  const roleLabel = {
+    platform_admin: "Platform Admin",
+    business_admin: "Business Owner",
+    outlet_manager: "Outlet Manager",
+    cashier: "Cashier",
+  }[user?.role] || user?.role?.replace(/_/g, " ");
 
   const Sidebar = (
     <aside
@@ -172,9 +179,12 @@ export default function AppLayout({ children }) {
             <div className="flex flex-col">
               <div className="font-display font-semibold">
                 {business?.business_name || (user?.role === "platform_admin" ? "Platform Console" : "RetailFlow AI")}
+                {outlet?.name && (
+                  <span className="text-muted-foreground font-normal"> · {outlet.name}</span>
+                )}
               </div>
-              <div className="text-xs text-muted-foreground capitalize">
-                {user?.role?.replace("_", " ")}
+              <div className="text-xs text-muted-foreground">
+                {roleLabel}
                 {business?.subscription_status && business.subscription_status !== "approved" && (
                   <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-warning/10 text-warning border border-warning/20">
                     {business.subscription_status}

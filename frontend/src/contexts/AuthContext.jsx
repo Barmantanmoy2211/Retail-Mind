@@ -33,6 +33,7 @@ export const AuthProvider = ({ children }) => {
     localStorage.setItem("token", data.access_token);
     setUser(data.user);
     setBusiness(data.business);
+    setOutlet(data.outlet || null);
     return data;
   };
 

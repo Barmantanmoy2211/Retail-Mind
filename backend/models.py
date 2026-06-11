@@ -33,6 +33,12 @@ class ExpenseStatus(str, Enum):
     REJECTED = "rejected"
 
 
+class ProductStatus(str, Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
 class PaymentMethod(str, Enum):
     CASH = "cash"
     UPI = "upi"
@@ -116,6 +122,8 @@ class ProductCreate(BaseModel):
     unit: str = "pcs"
     image_url: Optional[str] = None
     outlet_id: Optional[str] = None
+    outlet_ids: Optional[List[str]] = None
+    initial_stock: int = 0
 
 
 class ProductUpdate(BaseModel):
@@ -132,6 +140,13 @@ class ProductUpdate(BaseModel):
     unit: Optional[str] = None
     image_url: Optional[str] = None
     active: Optional[bool] = None
+    outlet_ids: Optional[List[str]] = None
+    initial_stock: Optional[int] = None
+
+
+class ProductAssignOutlets(BaseModel):
+    outlet_ids: List[str]
+    initial_stock: int = 0
 
 
 # === INVENTORY ===
@@ -228,6 +243,12 @@ class ExpenseCreate(BaseModel):
 class ExpenseApprove(BaseModel):
     action: str  # approve or reject
     note: Optional[str] = None
+
+
+class ProductApprove(BaseModel):
+    action: str  # approve or reject
+    note: Optional[str] = None
+    outlet_ids: Optional[List[str]] = None
 
 
 # === TAX CONFIG ===

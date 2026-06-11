@@ -12,20 +12,45 @@ import {
 } from "recharts";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
+import {
+  Select, SelectTrigger, SelectContent, SelectItem, SelectValue,
+} from "@/components/ui/select";
 
 const COLORS = ["#0055FF", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6"];
 
 export default function BusinessDashboard() {
-  const { user, business } = useAuth();
+  const { user, business, outlet } = useAuth();
+  const isAdmin = user?.role === "business_admin";
+  const isOutletScoped = ["outlet_manager", "cashier"].includes(user?.role);
+  const [outlets, setOutlets] = useState([]);
+  const [outletFilter, setOutletFilter] = useState("all");
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api.get("/dashboard/business").then((r) => {
+    if (isAdmin) {
+      api.get("/outlets").then((r) => setOutlets(r.data));
+    }
+  }, [isAdmin]);
+
+  const activeOutletId = isOutletScoped
+    ? user?.outlet_id
+    : outletFilter !== "all"
+      ? outletFilter
+      : null;
+
+  const selectedOutletName = isOutletScoped
+    ? outlet?.name
+    : outlets.find((o) => o.id === outletFilter)?.name;
+
+  useEffect(() => {
+    setLoading(true);
+    const params = activeOutletId ? `?outlet_id=${activeOutletId}` : "";
+    api.get(`/dashboard/business${params}`).then((r) => {
       setData(r.data);
       setLoading(false);
     });
-  }, []);
+  }, [activeOutletId]);
 
   if (loading) return <div className="text-muted-foreground">Loading dashboard…</div>;
   if (!data) return <div>Failed to load.</div>;
@@ -40,13 +65,32 @@ export default function BusinessDashboard() {
     <div className="space-y-8 animate-fade-up">
       <PageHeader
         title={`Welcome back, ${user?.name?.split(" ")[0]}.`}
-        description="Here's the pulse of your business today."
+        description={
+          selectedOutletName
+            ? `Here's the pulse of ${selectedOutletName} today.`
+            : "Here's the pulse of your business across all outlets."
+        }
         actions={
-          <Link to="/pos">
-            <Button data-testid="dash-pos-cta">
-              <Receipt size={14} className="mr-2" /> New Bill
-            </Button>
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            {isAdmin && outlets.length > 0 && (
+              <Select value={outletFilter} onValueChange={setOutletFilter}>
+                <SelectTrigger className="w-48 h-10" data-testid="dash-outlet-filter">
+                  <SelectValue placeholder="All outlets" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All outlets</SelectItem>
+                  {outlets.map((o) => (
+                    <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+            <Link to="/pos">
+              <Button data-testid="dash-pos-cta">
+                <Receipt size={14} className="mr-2" /> New Bill
+              </Button>
+            </Link>
+          </div>
         }
       />
 
@@ -118,26 +162,28 @@ export default function BusinessDashboard() {
       </div>
 
       {/* Outlet comparison + Recent bills */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="card-modern p-6 lg:col-span-1">
-          <div className="uppercase-label mb-1">Outlet comparison</div>
-          <h3 className="font-display font-semibold text-lg mb-4">Monthly sales</h3>
-          {data.outlet_comparison.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Create an outlet to compare.</p>
-          ) : (
-            <ResponsiveContainer width="100%" height={240}>
-              <BarChart data={data.outlet_comparison}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
-                <XAxis dataKey="outlet_name" stroke="hsl(var(--muted-foreground))" fontSize={10} />
-                <YAxis stroke="hsl(var(--muted-foreground))" fontSize={10} />
-                <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8 }} />
-                <Bar dataKey="sales" fill="hsl(var(--primary))" radius={[6, 6, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </div>
+      <div className={`grid grid-cols-1 ${isOutletScoped || outletFilter !== "all" ? "" : "lg:grid-cols-3"} gap-4`}>
+        {!isOutletScoped && outletFilter === "all" && (
+          <div className="card-modern p-6 lg:col-span-1">
+            <div className="uppercase-label mb-1">Outlet comparison</div>
+            <h3 className="font-display font-semibold text-lg mb-4">Monthly sales</h3>
+            {data.outlet_comparison.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Create an outlet to compare.</p>
+            ) : (
+              <ResponsiveContainer width="100%" height={240}>
+                <BarChart data={data.outlet_comparison}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                  <XAxis dataKey="outlet_name" stroke="hsl(var(--muted-foreground))" fontSize={10} />
+                  <YAxis stroke="hsl(var(--muted-foreground))" fontSize={10} />
+                  <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8 }} />
+                  <Bar dataKey="sales" fill="hsl(var(--primary))" radius={[6, 6, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+        )}
 
-        <div className="card-modern p-6 lg:col-span-2">
+        <div className={`card-modern p-6 ${isOutletScoped || outletFilter !== "all" ? "" : "lg:col-span-2"}`}>
           <div className="flex items-center justify-between mb-4">
             <div>
               <div className="uppercase-label">Recent bills</div>

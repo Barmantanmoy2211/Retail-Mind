@@ -6,7 +6,7 @@ from bson import ObjectId
 from db import get_db, clean_doc, utcnow_iso
 from auth_utils import get_current_user, require_roles, get_business_scope
 from models import (
-    ProductCreate, ProductUpdate, InventoryTxnCreate,
+    ProductCreate, ProductUpdate, ProductAssignOutlets, InventoryTxnCreate,
     CustomerCreate, CustomerUpdate, BillCreate,
     SupplierCreate, SupplierUpdate, PurchaseOrderCreate, PurchaseOrderUpdate,
     ExpenseCreate, ExpenseApprove, TaxConfigCreate, RewardConfig,
@@ -15,6 +15,59 @@ from models import (
 from routes_core import audit_log, _scope_filter
 
 router = APIRouter(prefix="/api")
+
+
+def _product_status(product: dict) -> str:
+    return product.get("status", "approved")
+
+
+def _product_assigned_to_outlet(product: dict, outlet_id: str) -> bool:
+    if not outlet_id:
+        return True
+    outlet_ids = product.get("outlet_ids")
+    if outlet_ids:
+        return outlet_id in outlet_ids
+    legacy = product.get("outlet_id")
+    if legacy is None:
+        return True
+    return legacy == outlet_id
+
+
+async def _validate_outlets_for_business(db, business_id: str, outlet_ids: list):
+    for oid in outlet_ids:
+        if not await db.outlets.find_one({"_id": ObjectId(oid), "business_id": business_id}):
+            raise HTTPException(400, f"Invalid outlet: {oid}")
+
+
+def _enforce_outlet_access(user: dict, outlet_id: str):
+    if user.get("role") in ("outlet_manager", "cashier") and user.get("outlet_id"):
+        if user["outlet_id"] != outlet_id:
+            raise HTTPException(403, "Not allowed for this outlet")
+
+
+async def _business_outlet_ids(db, business_id: str) -> list:
+    outlets = await db.outlets.find(
+        {"business_id": business_id, "active": {"$ne": False}}
+    ).to_list(100)
+    return [str(o["_id"]) for o in outlets]
+
+
+def _filter_products_for_user(docs: list, user: dict, outlet_id: Optional[str], approved_only: bool) -> list:
+    role = user.get("role")
+    oid = outlet_id or user.get("outlet_id")
+    filtered = []
+    for d in docs:
+        status = _product_status(d)
+        if approved_only and status != "approved":
+            continue
+        if role in ("outlet_manager", "cashier") and oid:
+            if status != "approved" or not _product_assigned_to_outlet(d, oid):
+                continue
+        elif role == "business_admin" and outlet_id:
+            if not _product_assigned_to_outlet(d, outlet_id):
+                continue
+        filtered.append(d)
+    return filtered
 
 
 # ============ CATEGORIES ============
@@ -53,14 +106,14 @@ async def delete_category(
 async def list_products(
     outlet_id: Optional[str] = None,
     search: Optional[str] = None,
+    status: Optional[str] = None,
+    approved_only: bool = False,
     user: dict = Depends(get_business_scope),
 ):
     db = get_db()
     f = {"business_id": user["business_id"]}
-    if outlet_id:
-        f["outlet_id"] = outlet_id
-    elif user.get("role") in ("outlet_manager", "cashier") and user.get("outlet_id"):
-        f["$or"] = [{"outlet_id": user["outlet_id"]}, {"outlet_id": None}]
+    if status:
+        f["status"] = status
     if search:
         f["$or"] = [
             {"name": {"$regex": search, "$options": "i"}},
@@ -68,13 +121,16 @@ async def list_products(
             {"barcode": search},
         ]
     docs = await db.products.find(f).to_list(2000)
-    # attach stock per outlet
+    docs = _filter_products_for_user(docs, user, outlet_id, approved_only)
+    scope_outlet = outlet_id or user.get("outlet_id")
     for d in docs:
         d["id"] = str(d["_id"])
         del d["_id"]
         stocks = await db.stocks.find({"product_id": d["id"]}).to_list(100)
         d["stock_by_outlet"] = {s["outlet_id"]: s["quantity"] for s in stocks}
         d["total_stock"] = sum(s["quantity"] for s in stocks)
+        if scope_outlet:
+            d["outlet_stock"] = d["stock_by_outlet"].get(scope_outlet, 0)
     return docs
 
 
@@ -84,14 +140,40 @@ async def create_product(
     user: dict = Depends(require_roles("business_admin", "outlet_manager")),
 ):
     db = get_db()
-    doc = payload.model_dump()
+    data = payload.model_dump()
+    outlet_ids = data.pop("outlet_ids", None) or []
+    initial_stock = data.pop("initial_stock", 0) or 0
+    data.pop("outlet_id", None)
+
+    doc = {k: v for k, v in data.items() if v is not None}
     doc["business_id"] = user["business_id"]
-    doc["active"] = True
+    doc["created_by"] = user["id"]
     doc["created_at"] = utcnow_iso()
     doc["updated_at"] = utcnow_iso()
+
+    if user["role"] == "outlet_manager":
+        if not user.get("outlet_id"):
+            raise HTTPException(400, "No outlet assigned to your account")
+        outlet_ids = [user["outlet_id"]]
+        doc["outlet_id"] = user["outlet_id"]
+    else:
+        if outlet_ids:
+            await _validate_outlets_for_business(db, user["business_id"], outlet_ids)
+        else:
+            outlet_ids = await _business_outlet_ids(db, user["business_id"])
+
+    doc["status"] = "approved"
+    doc["active"] = True
+    doc["outlet_ids"] = outlet_ids
     res = await db.products.insert_one(doc)
-    await audit_log(user, "create", "product", str(res.inserted_id))
-    return {"id": str(res.inserted_id)}
+    pid = str(res.inserted_id)
+
+    if initial_stock > 0:
+        for oid in outlet_ids:
+            await _adjust_stock(db, pid, oid, initial_stock, user["business_id"])
+
+    await audit_log(user, "create", "product", pid)
+    return {"id": pid, "status": "approved"}
 
 
 @router.put("/products/{pid}")
@@ -101,13 +183,62 @@ async def update_product(
     user: dict = Depends(require_roles("business_admin", "outlet_manager")),
 ):
     db = get_db()
-    update = {k: v for k, v in payload.model_dump().items() if v is not None}
+    existing = await db.products.find_one({"_id": ObjectId(pid), "business_id": user["business_id"]})
+    if not existing:
+        raise HTTPException(404)
+    data = payload.model_dump()
+    outlet_ids = data.pop("outlet_ids", None)
+    initial_stock = data.pop("initial_stock", None) or 0
+    update = {k: v for k, v in data.items() if v is not None}
+
+    if user["role"] == "outlet_manager":
+        if not _product_assigned_to_outlet(existing, user.get("outlet_id", "")):
+            raise HTTPException(403, "You can only edit products for your outlet")
+    elif outlet_ids is not None:
+        await _validate_outlets_for_business(db, user["business_id"], outlet_ids)
+        update["outlet_ids"] = outlet_ids
+        prev_ids = set(existing.get("outlet_ids") or [])
+        new_ids = [oid for oid in outlet_ids if oid not in prev_ids]
+        if initial_stock > 0:
+            for oid in new_ids:
+                await _adjust_stock(db, pid, oid, initial_stock, user["business_id"])
+
     update["updated_at"] = utcnow_iso()
     await db.products.update_one(
         {"_id": ObjectId(pid), "business_id": user["business_id"]},
         {"$set": update},
     )
     await audit_log(user, "update", "product", pid)
+    return {"success": True}
+
+
+@router.put("/products/{pid}/outlets")
+async def assign_product_outlets(
+    pid: str,
+    payload: ProductAssignOutlets,
+    user: dict = Depends(require_roles("business_admin")),
+):
+    """Business owner assigns product to outlets and optionally seeds stock."""
+    db = get_db()
+    product = await db.products.find_one({"_id": ObjectId(pid), "business_id": user["business_id"]})
+    if not product:
+        raise HTTPException(404)
+    await _validate_outlets_for_business(db, user["business_id"], payload.outlet_ids)
+    prev_ids = set(product.get("outlet_ids") or [])
+    new_ids = [oid for oid in payload.outlet_ids if oid not in prev_ids]
+    await db.products.update_one(
+        {"_id": ObjectId(pid)},
+        {"$set": {
+            "outlet_ids": payload.outlet_ids,
+            "status": "approved",
+            "active": True,
+            "updated_at": utcnow_iso(),
+        }},
+    )
+    if payload.initial_stock > 0:
+        for oid in new_ids:
+            await _adjust_stock(db, pid, oid, payload.initial_stock, user["business_id"])
+    await audit_log(user, "assign_outlets", "product", pid, {"outlet_ids": payload.outlet_ids})
     return {"success": True}
 
 
@@ -133,6 +264,8 @@ async def list_inventory_txns(
     f = {"business_id": user["business_id"]}
     if outlet_id:
         f["outlet_id"] = outlet_id
+    elif user.get("role") in ("outlet_manager", "cashier") and user.get("outlet_id"):
+        f["outlet_id"] = user["outlet_id"]
     docs = await db.inventory_txns.find(f).sort("created_at", -1).limit(500).to_list(500)
     for d in docs:
         d["id"] = str(d["_id"])
@@ -165,6 +298,16 @@ async def create_inventory_txn(
     user: dict = Depends(require_roles("business_admin", "outlet_manager")),
 ):
     db = get_db()
+    _enforce_outlet_access(user, payload.outlet_id)
+    if payload.to_outlet_id:
+        _enforce_outlet_access(user, payload.to_outlet_id)
+    product = await db.products.find_one({"_id": ObjectId(payload.product_id), "business_id": user["business_id"]})
+    if not product:
+        raise HTTPException(404, "Product not found")
+    if _product_status(product) != "approved":
+        raise HTTPException(400, "Product is not approved yet")
+    if not _product_assigned_to_outlet(product, payload.outlet_id):
+        raise HTTPException(400, "Product is not assigned to this outlet")
     doc = payload.model_dump()
     doc["business_id"] = user["business_id"]
     doc["created_by"] = user["id"]
@@ -188,14 +331,21 @@ async def create_inventory_txn(
 
 
 @router.get("/inventory/low-stock")
-async def low_stock(user: dict = Depends(get_business_scope)):
+async def low_stock(
+    outlet_id: Optional[str] = None,
+    user: dict = Depends(get_business_scope),
+):
     db = get_db()
     products = await db.products.find({"business_id": user["business_id"]}).to_list(2000)
+    products = _filter_products_for_user(products, user, outlet_id, approved_only=True)
+    scope_outlet = outlet_id or user.get("outlet_id")
     alerts = []
     for p in products:
         pid = str(p["_id"])
         stocks = await db.stocks.find({"product_id": pid}).to_list(100)
         for s in stocks:
+            if scope_outlet and s["outlet_id"] != scope_outlet:
+                continue
             if s["quantity"] <= p.get("min_stock", 0):
                 outlet = await db.outlets.find_one({"_id": ObjectId(s["outlet_id"])})
                 alerts.append({
@@ -296,6 +446,10 @@ async def create_bill(
         p = await db.products.find_one({"_id": ObjectId(it.product_id)})
         if not p:
             raise HTTPException(400, f"Product not found: {it.product_id}")
+        if _product_status(p) != "approved":
+            raise HTTPException(400, f"Product not approved: {p['name']}")
+        if not _product_assigned_to_outlet(p, payload.outlet_id):
+            raise HTTPException(400, f"Product not available at this outlet: {p['name']}")
         line_total = p["selling_price"] * it.quantity - it.discount
         tax_amt = line_total * (p.get("tax_percent", 0) / 100)
         subtotal += line_total
@@ -614,6 +768,7 @@ async def create_expense(
     user: dict = Depends(require_roles("business_admin", "outlet_manager")),
 ):
     db = get_db()
+    _enforce_outlet_access(user, payload.outlet_id)
     doc = payload.model_dump()
     doc["business_id"] = user["business_id"]
     doc["status"] = "approved" if user["role"] == "business_admin" else "pending"

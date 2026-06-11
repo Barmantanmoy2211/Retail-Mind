@@ -19,26 +19,39 @@ import { toast } from "sonner";
 
 export default function Inventory() {
   const { user } = useAuth();
+  const isAdmin = user?.role === "business_admin";
+  const userOutletId = user?.outlet_id;
   const [txns, setTxns] = useState([]);
   const [low, setLow] = useState([]);
   const [products, setProducts] = useState([]);
   const [outlets, setOutlets] = useState([]);
-  const [show, setShow] = useState(null); // 'stock_in' | 'stock_out' | 'transfer' | 'adjustment'
+  const [filterOutlet, setFilterOutlet] = useState("");
+  const [show, setShow] = useState(null);
   const [form, setForm] = useState({ product_id: "", outlet_id: "", quantity: "", to_outlet_id: "", note: "" });
 
   const load = async () => {
+    const outletQ = filterOutlet ? `?outlet_id=${filterOutlet}` : "";
+    const productQ = filterOutlet
+      ? `?outlet_id=${filterOutlet}&approved_only=true`
+      : userOutletId
+        ? `?outlet_id=${userOutletId}&approved_only=true`
+        : "?approved_only=true";
     const [t, l, p, o] = await Promise.all([
-      api.get("/inventory/transactions"),
-      api.get("/inventory/low-stock"),
-      api.get("/products"),
+      api.get(`/inventory/transactions${outletQ}`),
+      api.get(`/inventory/low-stock${outletQ}`),
+      api.get(`/products${productQ}`),
       api.get("/outlets"),
     ]);
     setTxns(t.data);
     setLow(l.data);
     setProducts(p.data);
     setOutlets(o.data);
+    if (!form.outlet_id) {
+      const defaultOutlet = userOutletId || o.data[0]?.id || "";
+      setForm((f) => ({ ...f, outlet_id: defaultOutlet }));
+    }
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [filterOutlet]);
 
   const submit = async () => {
     try {
@@ -63,9 +76,25 @@ export default function Inventory() {
 
   return (
     <div className="space-y-6 animate-fade-up">
+      {isAdmin && outlets.length > 1 && (
+        <Select value={filterOutlet || "all"} onValueChange={(v) => setFilterOutlet(v === "all" ? "" : v)}>
+          <SelectTrigger className="md:w-56 h-10" data-testid="inv-filter-outlet">
+            <SelectValue placeholder="All outlets" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All outlets</SelectItem>
+            {outlets.map((o) => <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      )}
+
       <PageHeader
         title="Inventory"
-        description={`${low.length} low-stock alerts.`}
+        description={
+          isAdmin
+            ? `${low.length} low-stock alerts across outlets.`
+            : "Inventory for your outlet — only approved products can be stocked."
+        }
         actions={
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => setShow("stock_in")} data-testid="inv-in"><ArrowDownToLine size={14} className="mr-1.5" />Stock In</Button>

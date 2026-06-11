@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import {
   Search, Plus, Minus, Trash2, ShoppingCart, CreditCard, User, X,
-  Receipt, Check, ScanBarcode,
+  Receipt, Check, ScanBarcode, Download,
 } from "lucide-react";
 import { Badge } from "@/components/SharedUI";
 
@@ -35,15 +35,16 @@ export default function POS() {
   const [lastBill, setLastBill] = useState(null);
 
   const load = async () => {
+    const outletParam = outletId ? `outlet_id=${outletId}&` : "";
     const [pr, ou] = await Promise.all([
-      api.get("/products"),
+      api.get(`/products?${outletParam}approved_only=true`),
       api.get("/outlets"),
     ]);
     setProducts(pr.data);
     setOutlets(ou.data);
     if (!outletId && ou.data.length > 0) setOutletId(ou.data[0].id);
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [outletId]);
 
   const categories = useMemo(() => {
     const set = new Set(products.map(p => p.category).filter(Boolean));
@@ -388,7 +389,8 @@ function InvoiceDialog({ open, onOpenChange, bill, currency }) {
   if (!bill) return null;
   const downloadPdf = async () => {
     const token = localStorage.getItem("token");
-    const res = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/bills/${bill.id}/invoice.pdf`, {
+    const backendUrl = process.env.REACT_APP_BACKEND_URL || "http://localhost:8000";
+    const res = await fetch(`${backendUrl}/api/bills/${bill.id}/invoice.pdf`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     const blob = await res.blob();

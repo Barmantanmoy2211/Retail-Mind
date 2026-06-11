@@ -72,8 +72,12 @@ async def login(payload: LoginRequest):
     user.pop("password_hash", None)
 
     biz_out = clean_doc(business) if business else None
+    outlet = None
+    if user.get("outlet_id"):
+        o = await db.outlets.find_one({"_id": ObjectId(user["outlet_id"])})
+        outlet = clean_doc(o) if o else None
     await audit_log(user, "login", "user", user["id"])
-    return {"access_token": token, "token_type": "bearer", "user": user, "business": biz_out}
+    return {"access_token": token, "token_type": "bearer", "user": user, "business": biz_out, "outlet": outlet}
 
 
 @router.post("/auth/register-business")

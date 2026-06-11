@@ -20,18 +20,42 @@ import HealthScoreView from "@/pages/HealthScore";
 const COLORS = ["#0055FF", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6"];
 
 export default function Reports() {
-  const { business } = useAuth();
+  const { user, business, outlet } = useAuth();
   const currency = business?.currency || "INR";
+  const isAdmin = user?.role === "business_admin";
+  const isOutletScoped = ["outlet_manager", "cashier"].includes(user?.role);
+  const [outlets, setOutlets] = useState([]);
+  const [outletFilter, setOutletFilter] = useState("all");
   const [period, setPeriod] = useState("monthly");
   const [pl, setPL] = useState(null);
   const [tax, setTax] = useState(null);
   const [inv, setInv] = useState(null);
 
   useEffect(() => {
-    api.get(`/reports/profit-loss?period=${period}`).then((r) => setPL(r.data));
-    api.get(`/reports/tax?days=${period === "yearly" ? 365 : period === "quarterly" ? 90 : 30}`).then((r) => setTax(r.data));
-    api.get("/reports/inventory").then((r) => setInv(r.data));
-  }, [period]);
+    if (isAdmin) {
+      api.get("/outlets").then((r) => setOutlets(r.data));
+    }
+  }, [isAdmin]);
+
+  const activeOutletId = isOutletScoped
+    ? user?.outlet_id
+    : outletFilter !== "all"
+      ? outletFilter
+      : null;
+
+  const outletQ = activeOutletId ? `&outlet_id=${activeOutletId}` : "";
+  const outletQuery = activeOutletId ? `?outlet_id=${activeOutletId}` : "";
+
+  const selectedOutletName = isOutletScoped
+    ? outlet?.name
+    : outlets.find((o) => o.id === outletFilter)?.name;
+
+  useEffect(() => {
+    const days = period === "yearly" ? 365 : period === "quarterly" ? 90 : period === "weekly" ? 7 : period === "daily" ? 1 : 30;
+    api.get(`/reports/profit-loss?period=${period}${outletQ}`).then((r) => setPL(r.data));
+    api.get(`/reports/tax?days=${days}${outletQ}`).then((r) => setTax(r.data));
+    api.get(`/reports/inventory${outletQuery}`).then((r) => setInv(r.data));
+  }, [period, outletQ, outletQuery]);
 
   const exportCSV = (rows, name) => {
     if (!rows || rows.length === 0) return;
@@ -61,18 +85,37 @@ export default function Reports() {
     <div className="space-y-6 animate-fade-up">
       <PageHeader
         title="Reports & Analytics"
-        description="Deep dive into your business metrics."
+        description={
+          selectedOutletName
+            ? `Metrics for ${selectedOutletName}.`
+            : "Deep dive into your business metrics across all outlets."
+        }
         actions={
-          <Select value={period} onValueChange={setPeriod}>
-            <SelectTrigger className="w-44 h-10" data-testid="rep-period"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="daily">Last 1 day</SelectItem>
-              <SelectItem value="weekly">Last 7 days</SelectItem>
-              <SelectItem value="monthly">Last 30 days</SelectItem>
-              <SelectItem value="quarterly">Last 90 days</SelectItem>
-              <SelectItem value="yearly">Last 365 days</SelectItem>
-            </SelectContent>
-          </Select>
+          <div className="flex flex-wrap gap-2">
+            {isAdmin && outlets.length > 0 && (
+              <Select value={outletFilter} onValueChange={setOutletFilter}>
+                <SelectTrigger className="w-48 h-10" data-testid="rep-outlet-filter">
+                  <SelectValue placeholder="All outlets" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All outlets</SelectItem>
+                  {outlets.map((o) => (
+                    <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+            <Select value={period} onValueChange={setPeriod}>
+              <SelectTrigger className="w-44 h-10" data-testid="rep-period"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="daily">Last 1 day</SelectItem>
+                <SelectItem value="weekly">Last 7 days</SelectItem>
+                <SelectItem value="monthly">Last 30 days</SelectItem>
+                <SelectItem value="quarterly">Last 90 days</SelectItem>
+                <SelectItem value="yearly">Last 365 days</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         }
       />
 
@@ -149,15 +192,17 @@ export default function Reports() {
                     </tbody>
                   </table>
                 </div>
-                <div className="card-modern p-6">
-                  <h3 className="font-display font-semibold mb-4">By outlet</h3>
-                  <table className="w-full text-sm">
-                    <thead><tr className="border-b border-border text-xs text-muted-foreground"><th className="text-left py-2">Outlet</th><th className="text-right py-2">Sales</th><th className="text-right py-2">Tax</th></tr></thead>
-                    <tbody>
-                      {tax.by_outlet.map((r, i) => <tr key={i} className="border-b border-border/50"><td className="py-2">{r.outlet_name || "—"}</td><td className="text-right font-mono">{formatCurrency(r.sales, currency)}</td><td className="text-right font-mono">{formatCurrency(r.tax, currency)}</td></tr>)}
-                    </tbody>
-                  </table>
-                </div>
+                {!activeOutletId && (
+                  <div className="card-modern p-6">
+                    <h3 className="font-display font-semibold mb-4">By outlet</h3>
+                    <table className="w-full text-sm">
+                      <thead><tr className="border-b border-border text-xs text-muted-foreground"><th className="text-left py-2">Outlet</th><th className="text-right py-2">Sales</th><th className="text-right py-2">Tax</th></tr></thead>
+                      <tbody>
+                        {tax.by_outlet.map((r, i) => <tr key={i} className="border-b border-border/50"><td className="py-2">{r.outlet_name || "—"}</td><td className="text-right font-mono">{formatCurrency(r.sales, currency)}</td><td className="text-right font-mono">{formatCurrency(r.tax, currency)}</td></tr>)}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             </>
           )}

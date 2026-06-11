@@ -15,6 +15,14 @@ def _date_range(days: int):
     return start.isoformat(), end.isoformat()
 
 
+def _scoped_outlet_id(user: dict, outlet_id: Optional[str] = None) -> Optional[str]:
+    if outlet_id:
+        return outlet_id
+    if user.get("role") in ("outlet_manager", "cashier") and user.get("outlet_id"):
+        return user["outlet_id"]
+    return None
+
+
 @router.get("/dashboard/business")
 async def business_dashboard(
     outlet_id: Optional[str] = None,
@@ -27,11 +35,10 @@ async def business_dashboard(
     month_start = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
     start, _ = _date_range(days)
 
+    scope_oid = _scoped_outlet_id(user, outlet_id)
     bill_filter = {"business_id": biz_id}
-    if outlet_id:
-        bill_filter["outlet_id"] = outlet_id
-    elif user.get("role") == "outlet_manager" and user.get("outlet_id"):
-        bill_filter["outlet_id"] = user["outlet_id"]
+    if scope_oid:
+        bill_filter["outlet_id"] = scope_oid
 
     # Today
     today_bills = await db.bills.find({**bill_filter, "created_at": {"$gte": today_start}}).to_list(10000)
@@ -51,8 +58,8 @@ async def business_dashboard(
 
     # Expenses
     exp_filter = {"business_id": biz_id, "status": "approved"}
-    if outlet_id:
-        exp_filter["outlet_id"] = outlet_id
+    if scope_oid:
+        exp_filter["outlet_id"] = scope_oid
     all_exp = await db.expenses.find(exp_filter).to_list(100000)
     total_expenses = sum(e.get("amount", 0) for e in all_exp)
     monthly_exp = sum(e.get("amount", 0) for e in all_exp if e.get("created_at", "") >= month_start)
@@ -60,18 +67,33 @@ async def business_dashboard(
     # Customers
     total_customers = await db.customers.count_documents({"business_id": biz_id})
 
-    # Products
-    prod_filter = {"business_id": biz_id}
-    if outlet_id:
-        prod_filter["$or"] = [{"outlet_id": outlet_id}, {"outlet_id": None}]
-    total_products = await db.products.count_documents(prod_filter)
+    # Products & inventory (optionally scoped to one outlet)
+    products = await db.products.find({"business_id": biz_id}).to_list(5000)
+    if scope_oid:
+        visible = []
+        for p in products:
+            status = p.get("status", "approved")
+            if status != "approved":
+                continue
+            outlet_ids = p.get("outlet_ids")
+            if outlet_ids:
+                if scope_oid not in outlet_ids:
+                    continue
+            else:
+                legacy = p.get("outlet_id")
+                if legacy is not None and legacy != scope_oid:
+                    continue
+            visible.append(p)
+        products = visible
+    total_products = len(products)
 
-    # Inventory value (cost_price * total stock)
     inventory_value = 0.0
-    products = await db.products.find(prod_filter).to_list(5000)
     for p in products:
         stocks = await db.stocks.find({"product_id": str(p["_id"])}).to_list(100)
-        stock_qty = sum(s.get("quantity", 0) for s in stocks)
+        if scope_oid:
+            stock_qty = sum(s.get("quantity", 0) for s in stocks if s.get("outlet_id") == scope_oid)
+        else:
+            stock_qty = sum(s.get("quantity", 0) for s in stocks)
         inventory_value += stock_qty * p.get("cost_price", 0)
 
     # Reward points issued
@@ -96,6 +118,8 @@ async def business_dashboard(
     # Outlet comparison
     outlet_comparison = []
     outlets = await db.outlets.find({"business_id": biz_id}).to_list(100)
+    if scope_oid:
+        outlets = [o for o in outlets if str(o["_id"]) == scope_oid]
     for o in outlets:
         oid = str(o["_id"])
         obills = [b for b in monthly_bills if b.get("outlet_id") == oid]
@@ -127,6 +151,8 @@ async def business_dashboard(
     for p in products:
         stocks = await db.stocks.find({"product_id": str(p["_id"])}).to_list(100)
         for s in stocks:
+            if scope_oid and s.get("outlet_id") != scope_oid:
+                continue
             if s.get("quantity", 0) <= p.get("min_stock", 0):
                 low_stock_count += 1
                 break
@@ -166,12 +192,16 @@ async def profit_loss(
     days = days_map.get(period, 30)
     start = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
 
+    scope_oid = _scoped_outlet_id(user, outlet_id)
     f = {"business_id": user["business_id"], "created_at": {"$gte": start}}
-    if outlet_id:
-        f["outlet_id"] = outlet_id
+    if scope_oid:
+        f["outlet_id"] = scope_oid
 
     bills = await db.bills.find(f).to_list(100000)
-    expenses = await db.expenses.find({**f, "status": "approved"}).to_list(100000)
+    exp_f = {"business_id": user["business_id"], "status": "approved", "created_at": {"$gte": start}}
+    if scope_oid:
+        exp_f["outlet_id"] = scope_oid
+    expenses = await db.expenses.find(exp_f).to_list(100000)
 
     revenue = sum(b.get("total", 0) for b in bills)
     tax = sum(b.get("tax_total", 0) for b in bills)
@@ -209,9 +239,10 @@ async def tax_report(
 ):
     db = get_db()
     start = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    scope_oid = _scoped_outlet_id(user, outlet_id)
     f = {"business_id": user["business_id"], "created_at": {"$gte": start}}
-    if outlet_id:
-        f["outlet_id"] = outlet_id
+    if scope_oid:
+        f["outlet_id"] = scope_oid
     bills = await db.bills.find(f).to_list(100000)
 
     daily = {}
@@ -253,13 +284,35 @@ async def tax_report(
 
 
 @router.get("/reports/inventory")
-async def inventory_report(user: dict = Depends(get_business_scope)):
+async def inventory_report(
+    outlet_id: Optional[str] = None,
+    user: dict = Depends(get_business_scope),
+):
     db = get_db()
+    scope_oid = _scoped_outlet_id(user, outlet_id)
     products = await db.products.find({"business_id": user["business_id"]}).to_list(5000)
-    
+    if scope_oid:
+        visible = []
+        for p in products:
+            if p.get("status", "approved") != "approved":
+                continue
+            outlet_ids = p.get("outlet_ids")
+            if outlet_ids:
+                if scope_oid not in outlet_ids:
+                    continue
+            else:
+                legacy = p.get("outlet_id")
+                if legacy is not None and legacy != scope_oid:
+                    continue
+            visible.append(p)
+        products = visible
+
     # Sales by product (last 90 days)
     start = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
-    bills = await db.bills.find({"business_id": user["business_id"], "created_at": {"$gte": start}}).to_list(100000)
+    bill_f = {"business_id": user["business_id"], "created_at": {"$gte": start}}
+    if scope_oid:
+        bill_f["outlet_id"] = scope_oid
+    bills = await db.bills.find(bill_f).to_list(100000)
     sales_by_product = {}
     for b in bills:
         for it in b.get("items", []):
@@ -271,7 +324,10 @@ async def inventory_report(user: dict = Depends(get_business_scope)):
     for p in products:
         pid = str(p["_id"])
         stocks = await db.stocks.find({"product_id": pid}).to_list(100)
-        qty = sum(s.get("quantity", 0) for s in stocks)
+        if scope_oid:
+            qty = sum(s.get("quantity", 0) for s in stocks if s.get("outlet_id") == scope_oid)
+        else:
+            qty = sum(s.get("quantity", 0) for s in stocks)
         sold = sales_by_product.get(pid, 0)
         item = {
             "id": pid,
@@ -306,9 +362,10 @@ async def sales_report(
 ):
     db = get_db()
     start = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    scope_oid = _scoped_outlet_id(user, outlet_id)
     f = {"business_id": user["business_id"], "created_at": {"$gte": start}}
-    if outlet_id:
-        f["outlet_id"] = outlet_id
+    if scope_oid:
+        f["outlet_id"] = scope_oid
     bills = await db.bills.find(f).sort("created_at", -1).to_list(100000)
     return {
         "bills": [clean_doc(b) for b in bills[:500]],
