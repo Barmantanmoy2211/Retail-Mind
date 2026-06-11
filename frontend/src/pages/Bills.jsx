@@ -2,11 +2,24 @@ import React, { useEffect, useState } from "react";
 import api, { formatCurrency, formatDate } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { PageHeader, Badge, EmptyState } from "@/components/SharedUI";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import { Search, Eye, Download } from "lucide-react";
+import { Search, Eye, Download, FileDown } from "lucide-react";
+
+const downloadPdf = async (bill) => {
+  const token = localStorage.getItem("token");
+  const res = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/bills/${bill.id}/invoice.pdf`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const blob = await res.blob();
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `${bill.bill_no || "invoice"}.pdf`;
+  a.click();
+};
 
 export default function Bills() {
   const { business } = useAuth();
@@ -67,7 +80,16 @@ export default function Bills() {
                   <td className="p-4">{b.items?.length || 0}</td>
                   <td className="p-4"><Badge variant="outline">{b.payment_method}</Badge></td>
                   <td className="p-4 text-right font-mono font-medium">{formatCurrency(b.total, currency)}</td>
-                  <td className="p-4"><Eye size={14} className="text-muted-foreground" /></td>
+                  <td className="p-4" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      onClick={() => downloadPdf(b)}
+                      className="p-1.5 rounded hover:bg-primary/10 text-primary"
+                      data-testid={`bill-pdf-${b.id}`}
+                      title="Download PDF"
+                    >
+                      <FileDown size={14} />
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -101,6 +123,12 @@ export default function Bills() {
               </div>
             </div>
           )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSelected(null)}>Close</Button>
+            <Button onClick={() => downloadPdf(selected)} data-testid="bill-detail-pdf">
+              <FileDown size={14} className="mr-1.5" />Download PDF
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

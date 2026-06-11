@@ -16,6 +16,7 @@ const PLATFORM_ITEMS = [
   { label: "Platform Overview", to: "/platform", icon: LayoutDashboard },
   { label: "Businesses", to: "/platform/businesses", icon: Building2 },
   { label: "Approvals", to: "/platform/approvals", icon: ShieldCheck },
+  { label: "Platform Admins", to: "/platform/admins", icon: Users },
 ];
 
 const BUSINESS_ITEMS = [

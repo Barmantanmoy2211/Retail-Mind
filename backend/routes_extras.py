@@ -3,19 +3,137 @@ import io
 from typing import Optional
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 from bson import ObjectId
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 
 from db import get_db, clean_doc
-from auth_utils import get_current_user, require_roles, get_business_scope
+from auth_utils import get_current_user, require_roles, get_business_scope, hash_password
 from s3_utils import upload_bytes, is_configured as s3_is_configured
+from pdf_invoice import build_invoice_pdf
 
 router = APIRouter(prefix="/api")
 
 ALLOWED_IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp", "image/gif"}
 MAX_IMAGE_MB = 5
+
+
+# ============ PDF INVOICE ============
+@router.get("/bills/{bill_id}/invoice.pdf")
+async def bill_pdf(bill_id: str, user: dict = Depends(get_current_user)):
+    db = get_db()
+    try:
+        bill = await db.bills.find_one({"_id": ObjectId(bill_id)})
+    except Exception:
+        raise HTTPException(400, "Invalid bill id")
+    if not bill:
+        raise HTTPException(404, "Bill not found")
+    # tenant check
+    if user.get("role") != "platform_admin" and bill.get("business_id") != user.get("business_id"):
+        raise HTTPException(403, "Forbidden")
+    biz = await db.businesses.find_one({"_id": ObjectId(bill["business_id"])})
+    outlet = None
+    if bill.get("outlet_id"):
+        outlet = await db.outlets.find_one({"_id": ObjectId(bill["outlet_id"])})
+
+    pdf_bytes = build_invoice_pdf(bill, biz or {}, outlet)
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{bill.get("bill_no", "invoice")}.pdf"'},
+    )
+
+
+# ============ PLATFORM ADMINS (only platform_admin can manage) ============
+from pydantic import BaseModel, EmailStr
+from typing import Optional as Opt
+
+
+class PlatformAdminCreate(BaseModel):
+    name: str
+    email: EmailStr
+    password: str
+    phone: Opt[str] = None
+
+
+@router.get("/platform/admins")
+async def list_platform_admins(user: dict = Depends(require_roles("platform_admin"))):
+    db = get_db()
+    docs = await db.users.find({"role": "platform_admin"}, {"password_hash": 0}).to_list(100)
+    return [clean_doc(d) for d in docs]
+
+
+@router.post("/platform/admins")
+async def create_platform_admin(
+    payload: PlatformAdminCreate,
+    user: dict = Depends(require_roles("platform_admin")),
+):
+    db = get_db()
+    existing = await db.users.find_one({"email": payload.email.lower()})
+    if existing:
+        raise HTTPException(400, "Email already registered")
+    doc = {
+        "name": payload.name,
+        "email": payload.email.lower(),
+        "phone": payload.phone,
+        "password_hash": hash_password(payload.password),
+        "role": "platform_admin",
+        "business_id": None,
+        "outlet_id": None,
+        "active": True,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "created_by": user["id"],
+    }
+    res = await db.users.insert_one(doc)
+    await db.audit_logs.insert_one({
+        "user_id": user["id"],
+        "user_name": user["name"],
+        "action": "create_platform_admin",
+        "entity": "user",
+        "entity_id": str(res.inserted_id),
+        "details": {"email": payload.email.lower()},
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+    return {"id": str(res.inserted_id)}
+
+
+@router.delete("/platform/admins/{admin_id}")
+async def delete_platform_admin(
+    admin_id: str,
+    user: dict = Depends(require_roles("platform_admin")),
+):
+    if admin_id == user["id"]:
+        raise HTTPException(400, "Cannot delete yourself")
+    db = get_db()
+    # safety: keep at least 1 platform admin
+    count = await db.users.count_documents({"role": "platform_admin", "active": True})
+    if count <= 1:
+        raise HTTPException(400, "At least one platform admin must remain")
+    res = await db.users.delete_one({"_id": ObjectId(admin_id), "role": "platform_admin"})
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Admin not found")
+    return {"success": True}
+
+
+@router.put("/platform/admins/{admin_id}/toggle")
+async def toggle_platform_admin(
+    admin_id: str,
+    user: dict = Depends(require_roles("platform_admin")),
+):
+    if admin_id == user["id"]:
+        raise HTTPException(400, "Cannot disable yourself")
+    db = get_db()
+    admin = await db.users.find_one({"_id": ObjectId(admin_id), "role": "platform_admin"})
+    if not admin:
+        raise HTTPException(404, "Admin not found")
+    await db.users.update_one(
+        {"_id": ObjectId(admin_id)},
+        {"$set": {"active": not admin.get("active", True), "updated_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    return {"success": True, "active": not admin.get("active", True)}
+
 
 
 # ============ UPLOADS ============

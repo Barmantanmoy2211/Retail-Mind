@@ -12,6 +12,7 @@ import PendingApproval from "@/pages/PendingApproval";
 import BusinessDashboard from "@/pages/BusinessDashboard";
 import PlatformDashboard from "@/pages/PlatformDashboard";
 import PlatformBusinesses from "@/pages/PlatformBusinesses";
+import PlatformAdmins from "@/pages/PlatformAdmins";
 import POS from "@/pages/POS";
 import Products from "@/pages/Products";
 import Customers from "@/pages/Customers";
@@ -69,6 +70,7 @@ function App() {
             <Route path="/platform" element={<ProtectedRoute roles={["platform_admin"]}><PlatformDashboard /></ProtectedRoute>} />
             <Route path="/platform/businesses" element={<ProtectedRoute roles={["platform_admin"]}><PlatformBusinesses /></ProtectedRoute>} />
             <Route path="/platform/approvals" element={<ProtectedRoute roles={["platform_admin"]}><PlatformBusinesses /></ProtectedRoute>} />
+            <Route path="/platform/admins" element={<ProtectedRoute roles={["platform_admin"]}><PlatformAdmins /></ProtectedRoute>} />
 
             {/* Business / Outlet / Cashier */}
             <Route path="/dashboard" element={<ProtectedRoute roles={["business_admin", "outlet_manager"]}><BusinessDashboard /></ProtectedRoute>} />

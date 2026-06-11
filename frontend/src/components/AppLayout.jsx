@@ -20,6 +20,7 @@ const platformNav = [
   { to: "/platform", label: "Overview", icon: LayoutDashboard },
   { to: "/platform/businesses", label: "Businesses", icon: Building2 },
   { to: "/platform/approvals", label: "Approvals", icon: ShieldCheck },
+  { to: "/platform/admins", label: "Platform Admins", icon: Users },
 ];
 
 const businessNav = [

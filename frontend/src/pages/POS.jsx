@@ -386,6 +386,17 @@ function CustomerDialog({ open, onOpenChange, onSelect }) {
 
 function InvoiceDialog({ open, onOpenChange, bill, currency }) {
   if (!bill) return null;
+  const downloadPdf = async () => {
+    const token = localStorage.getItem("token");
+    const res = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/bills/${bill.id}/invoice.pdf`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const blob = await res.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${bill.bill_no || "invoice"}.pdf`;
+    a.click();
+  };
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
@@ -415,8 +426,11 @@ function InvoiceDialog({ open, onOpenChange, bill, currency }) {
             </div>
           )}
         </div>
-        <DialogFooter>
-          <Button onClick={() => onOpenChange(false)} className="w-full" data-testid="invoice-close">Done</Button>
+        <DialogFooter className="flex gap-2">
+          <Button variant="outline" onClick={downloadPdf} data-testid="invoice-pdf" className="flex-1">
+            <Download size={14} className="mr-1.5" />PDF
+          </Button>
+          <Button onClick={() => onOpenChange(false)} className="flex-1" data-testid="invoice-close">Done</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
