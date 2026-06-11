@@ -27,14 +27,22 @@ export default function Customers() {
   useEffect(() => { load(); }, [q]);
 
   const save = async () => {
+    if (!form.name || !form.phone) {
+      toast.error("Name and phone are required");
+      return;
+    }
     try {
-      await api.post("/customers", form);
+      const payload = { name: form.name, phone: form.phone };
+      if (form.email) payload.email = form.email;
+      if (form.address) payload.address = form.address;
+      await api.post("/customers", payload);
       toast.success("Customer added");
       setShowDialog(false);
       setForm({ name: "", phone: "", email: "", address: "" });
       load();
     } catch (e) {
-      toast.error(e.response?.data?.detail || "Failed");
+      const d = e.response?.data?.detail;
+      toast.error(typeof d === "string" ? d : "Failed to add customer");
     }
   };
 

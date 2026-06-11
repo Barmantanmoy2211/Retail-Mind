@@ -328,15 +328,22 @@ function CustomerDialog({ open, onOpenChange, onSelect }) {
   useEffect(() => { if (open) search(""); }, [open]);
 
   const create = async () => {
+    if (!form.name || !form.phone) {
+      toast.error("Name and phone are required");
+      return;
+    }
     try {
-      const { data } = await api.post("/customers", form);
+      const payload = { name: form.name, phone: form.phone };
+      if (form.email) payload.email = form.email;
+      const { data } = await api.post("/customers", payload);
       toast.success("Customer added");
-      const c = { ...form, id: data.id, reward_balance: 0 };
+      const c = { ...payload, id: data.id, reward_balance: 0 };
       onSelect(c);
       setShowNew(false);
       setForm({ name: "", phone: "", email: "" });
     } catch (e) {
-      toast.error(e.response?.data?.detail || "Failed");
+      const d = e.response?.data?.detail;
+      toast.error(typeof d === "string" ? d : "Failed to add customer");
     }
   };
 

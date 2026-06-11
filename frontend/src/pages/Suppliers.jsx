@@ -22,14 +22,23 @@ export default function Suppliers() {
   useEffect(() => { load(); }, []);
 
   const save = async () => {
+    if (!form.name || !form.contact) {
+      toast.error("Name and contact are required");
+      return;
+    }
     try {
-      await api.post("/suppliers", form);
+      const payload = { name: form.name, contact: form.contact };
+      if (form.email) payload.email = form.email;
+      if (form.gst_number) payload.gst_number = form.gst_number;
+      if (form.address) payload.address = form.address;
+      await api.post("/suppliers", payload);
       toast.success("Supplier added");
       setShowDialog(false);
       setForm({ name: "", contact: "", email: "", gst_number: "", address: "" });
       load();
     } catch (e) {
-      toast.error("Failed");
+      const d = e.response?.data?.detail;
+      toast.error(typeof d === "string" ? d : "Failed to add supplier");
     }
   };
 
