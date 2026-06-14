@@ -1,0 +1,53 @@
+export const PERMISSION_GROUPS = {
+  organization: [
+    { key: "roles.create", label: "Create Roles" },
+    { key: "roles.edit", label: "Edit Roles" },
+    { key: "roles.view", label: "View Roles" },
+    { key: "employees.create", label: "Create Employees" },
+    { key: "employees.edit", label: "Edit Employees" },
+    { key: "employees.view", label: "View Employees" },
+    { key: "employees.transfer", label: "Transfer Employees" },
+    { key: "approvals.view", label: "View Approvals" },
+    { key: "approvals.act", label: "Act on Approvals" },
+  ],
+  operations: [
+    { key: "bills.create", label: "Create Bills" },
+    { key: "products.create", label: "Create Products" },
+    { key: "products.edit", label: "Edit Products" },
+    { key: "inventory.manage", label: "Manage Inventory" },
+    { key: "customers.view", label: "View Customers" },
+  ],
+  finance: [
+    { key: "expenses.create", label: "Create Expenses" },
+    { key: "expenses.approve", label: "Approve Expenses" },
+    { key: "reports.view", label: "View Reports" },
+    { key: "reports.export", label: "Export Reports" },
+  ],
+  admin: [
+    { key: "outlets.manage", label: "Manage Outlets" },
+    { key: "settings.manage", label: "Manage Settings" },
+    { key: "audit.view", label: "View Audit Logs" },
+    { key: "workflows.manage", label: "Manage Workflows" },
+  ],
+};
+
+export const ROUTE_PERMISSIONS = {
+  "/dashboard": ["reports.view"],
+  "/pos": ["bills.create"],
+  "/products": ["products.create", "products.edit", "bills.create"],
+  "/inventory": ["inventory.manage"],
+  "/customers": ["customers.view"],
+  "/bills": ["bills.create"],
+  "/suppliers": ["inventory.manage"],
+  "/purchase-orders": ["inventory.manage"],
+  "/expenses": ["expenses.create", "expenses.approve"],
+  "/outlets": ["outlets.manage"],
+  "/organization": ["employees.view", "roles.view"],
+  "/staff": ["employees.view", "roles.view"],
+  "/rewards": ["settings.manage"],
+  "/taxes": ["settings.manage"],
+  "/reports": ["reports.view"],
+  "/health-score": ["reports.view"],
+  "/audit": ["audit.view"],
+  "/settings": ["settings.manage"],
+};

@@ -16,6 +16,7 @@ import {
   Receipt, Check, ScanBarcode, Download,
 } from "lucide-react";
 import { Badge } from "@/components/SharedUI";
+import CustomerLocationField from "@/components/CustomerLocationField";
 
 export default function POS() {
   const { user, business } = useAuth();
@@ -38,11 +39,14 @@ export default function POS() {
     const outletParam = outletId ? `outlet_id=${outletId}&` : "";
     const [pr, ou] = await Promise.all([
       api.get(`/products?${outletParam}approved_only=true`),
-      api.get("/outlets"),
+      api.get("/outlets?active_only=true&exclude_warehouse=true"),
     ]);
     setProducts(pr.data);
     setOutlets(ou.data);
-    if (!outletId && ou.data.length > 0) setOutletId(ou.data[0].id);
+    if (!outletId && ou.data.length > 0) {
+      const preferred = user?.outlet_id && ou.data.find((o) => o.id === user.outlet_id);
+      setOutletId(preferred?.id || ou.data[0].id);
+    }
   };
   useEffect(() => { load(); }, [outletId]);
 
@@ -317,31 +321,50 @@ export default function POS() {
 }
 
 function CustomerDialog({ open, onOpenChange, onSelect }) {
+  const { user, outlet } = useAuth();
+  const isOutletStaff = ["outlet_manager", "cashier"].includes(user?.role);
   const [list, setList] = useState([]);
   const [q, setQ] = useState("");
   const [showNew, setShowNew] = useState(false);
-  const [form, setForm] = useState({ name: "", phone: "", email: "" });
+  const [form, setForm] = useState({ name: "", phone: "", email: "", location: "" });
+
+  const startNewCustomer = () => {
+    setForm({
+      name: "", phone: "", email: "",
+      location: isOutletStaff ? (outlet?.name || "") : "",
+    });
+    setShowNew(true);
+  };
 
   const search = async (query) => {
-    const { data } = await api.get(`/customers${query ? `?search=${query}` : ""}`);
+    const params = new URLSearchParams();
+    if (query) params.set("search", query);
+    if (isOutletStaff && user?.outlet_id) params.set("outlet_id", user.outlet_id);
+    const qs = params.toString();
+    const { data } = await api.get(`/customers${qs ? `?${qs}` : ""}`);
     setList(data);
   };
-  useEffect(() => { if (open) search(""); }, [open]);
+  useEffect(() => { if (open) search(""); }, [open, user?.outlet_id]);
 
   const create = async () => {
     if (!form.name || !form.phone) {
       toast.error("Name and phone are required");
       return;
     }
+    if (user?.role === "business_admin" && !form.location) {
+      toast.error("Please select an outlet for location");
+      return;
+    }
     try {
       const payload = { name: form.name, phone: form.phone };
       if (form.email) payload.email = form.email;
+      payload.location = form.location || (isOutletStaff ? outlet?.name : "") || undefined;
       const { data } = await api.post("/customers", payload);
       toast.success("Customer added");
       const c = { ...payload, id: data.id, reward_balance: 0 };
       onSelect(c);
       setShowNew(false);
-      setForm({ name: "", phone: "", email: "" });
+      setForm({ name: "", phone: "", email: "", location: "" });
     } catch (e) {
       const d = e.response?.data?.detail;
       toast.error(typeof d === "string" ? d : "Failed to add customer");
@@ -359,6 +382,11 @@ function CustomerDialog({ open, onOpenChange, onSelect }) {
             <Input placeholder="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} data-testid="new-cust-name" />
             <Input placeholder="Phone" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} data-testid="new-cust-phone" />
             <Input placeholder="Email (optional)" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} data-testid="new-cust-email" />
+            <CustomerLocationField
+              value={form.location}
+              onChange={(v) => setForm({ ...form, location: v })}
+              testId="new-cust-location"
+            />
             <DialogFooter>
               <Button variant="outline" onClick={() => setShowNew(false)}>Back</Button>
               <Button onClick={create} data-testid="new-cust-save">Save & select</Button>
@@ -372,12 +400,16 @@ function CustomerDialog({ open, onOpenChange, onSelect }) {
                 <button key={c.id} onClick={() => onSelect(c)} data-testid={`select-cust-${c.id}`}
                   className="w-full text-left p-3 rounded-lg border border-border hover:border-primary hover:bg-secondary">
                   <div className="font-medium">{c.name}</div>
-                  <div className="text-xs text-muted-foreground">{c.phone} · {c.reward_balance} pts</div>
+                  <div className="text-xs text-muted-foreground">
+                    {c.phone}
+                    {c.location ? ` · ${c.location}` : ""}
+                    {" · "}{c.reward_balance} pts
+                  </div>
                 </button>
               ))}
               {list.length === 0 && <p className="text-center text-sm text-muted-foreground py-4">No matches</p>}
             </div>
-            <Button variant="outline" onClick={() => setShowNew(true)} className="w-full" data-testid="cust-new-btn">+ Add new customer</Button>
+            <Button variant="outline" onClick={startNewCustomer} className="w-full" data-testid="cust-new-btn">+ Add new customer</Button>
           </div>
         )}
       </DialogContent>

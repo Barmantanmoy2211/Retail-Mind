@@ -1,15 +1,18 @@
 """All API routes for RetailFlow AI - consolidated for simplicity."""
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from typing import Optional, List
 from datetime import datetime, timezone, timedelta
 from bson import ObjectId
 from db import get_db, clean_doc, utcnow_iso
 from auth_utils import (
     hash_password, verify_password, create_access_token,
-    get_current_user, require_roles, get_business_scope
+    get_current_user, require_roles, get_business_scope, require_permission_or_roles,
 )
+from permissions import enrich_user_context, get_user_permissions
+from org_seed import migrate_business_users, seed_default_workflows, import_role_template
+from outlet_utils import compute_outlet_stats_30d, get_business_warehouse
 from models import (
-    LoginRequest, RegisterBusinessRequest, UserCreate, UserUpdate,
+    LoginRequest, RegisterBusinessRequest, UserCreate, UserUpdate, DirectEmployeeCreate,
     BusinessUpdate, OutletCreate, OutletUpdate,
     ProductCreate, ProductUpdate, InventoryTxnCreate,
     CustomerCreate, CustomerUpdate, BillCreate,
@@ -25,7 +28,16 @@ PLAN_LIMITS = {"starter": 1, "growth": 5, "enterprise": 9999}
 PLAN_PRICES = {"starter": 999, "growth": 2999, "enterprise": 9999}
 
 
-async def audit_log(user: dict, action: str, entity: str, entity_id: str = "", details: dict = None):
+async def audit_log(
+    user: dict,
+    action: str,
+    entity: str,
+    entity_id: str = "",
+    details: dict = None,
+    previous: dict = None,
+    new_value: dict = None,
+    ip_address: str = None,
+):
     db = get_db()
     await db.audit_logs.insert_one({
         "user_id": user.get("id"),
@@ -35,6 +47,9 @@ async def audit_log(user: dict, action: str, entity: str, entity_id: str = "", d
         "entity": entity,
         "entity_id": entity_id,
         "details": details or {},
+        "previous": previous,
+        "new_value": new_value,
+        "ip_address": ip_address,
         "timestamp": utcnow_iso(),
     })
 
@@ -65,6 +80,7 @@ async def login(payload: LoginRequest):
                 raise HTTPException(status_code=403, detail="Subscription rejected. Contact platform admin.")
             if business.get("subscription_status") == "suspended":
                 raise HTTPException(status_code=403, detail="Business suspended. Contact platform admin.")
+        await migrate_business_users(db, user["business_id"])
 
     token = create_access_token({"sub": str(user["_id"]), "role": user["role"]})
     user["id"] = str(user["_id"])
@@ -110,6 +126,7 @@ async def register_business(payload: RegisterBusinessRequest):
         "phone": payload.phone,
         "password_hash": hash_password(payload.password),
         "role": "business_admin",
+        "system_role": "business_admin",
         "business_id": biz_id,
         "outlet_id": None,
         "active": True,
@@ -132,6 +149,9 @@ async def register_business(payload: RegisterBusinessRequest):
 @router.get("/auth/me")
 async def me(user: dict = Depends(get_current_user)):
     db = get_db()
+    if user.get("business_id"):
+        await migrate_business_users(db, user["business_id"])
+    user = await enrich_user_context(user)
     business = None
     if user.get("business_id"):
         b = await db.businesses.find_one({"_id": ObjectId(user["business_id"])})
@@ -140,7 +160,15 @@ async def me(user: dict = Depends(get_current_user)):
     if user.get("outlet_id"):
         o = await db.outlets.find_one({"_id": ObjectId(user["outlet_id"])})
         outlet = clean_doc(o) if o else None
-    return {"user": user, "business": business, "outlet": outlet}
+    permissions = user.get("permissions") or await get_user_permissions(user)
+    return {
+        "user": user,
+        "business": business,
+        "outlet": outlet,
+        "permissions": permissions,
+        "role": user.get("business_role"),
+        "reports_to": user.get("reports_to"),
+    }
 
 
 # ============ PLATFORM ADMIN: BUSINESSES ============
@@ -180,6 +208,11 @@ async def platform_business_action(
     if action == "approve":
         update["subscription_status"] = "approved"
         update["approved_at"] = utcnow_iso()
+        owner = await db.users.find_one({"business_id": biz_id, "role": "business_admin"})
+        if owner:
+            await import_role_template(db, biz_id, "retail", str(owner["_id"]))
+            await seed_default_workflows(db, biz_id)
+            await migrate_business_users(db, biz_id)
     elif action == "reject":
         update["subscription_status"] = "rejected"
     elif action == "suspend":
@@ -291,7 +324,7 @@ async def business_me(user: dict = Depends(get_business_scope)):
 @router.put("/business/me")
 async def business_update_me(
     payload: BusinessUpdate,
-    user: dict = Depends(require_roles("business_admin")),
+    user: dict = Depends(require_permission_or_roles("settings.manage", "business_admin")),
 ):
     db = get_db()
     update = {k: v for k, v in payload.model_dump().items() if v is not None}
@@ -302,28 +335,90 @@ async def business_update_me(
 
 
 # ============ OUTLETS ============
-@router.get("/outlets")
-async def list_outlets(user: dict = Depends(get_business_scope)):
-    db = get_db()
+def _outlet_list_filter(
+    user: dict,
+    active_only: bool = False,
+    exclude_warehouse: bool = False,
+) -> dict:
     f = _scope_filter(user)
     if user.get("role") == "outlet_manager":
         f["_id"] = ObjectId(user["outlet_id"]) if user.get("outlet_id") else None
+    if active_only:
+        f["active"] = {"$ne": False}
+    if exclude_warehouse:
+        f["is_warehouse"] = {"$ne": True}
+    return f
+
+
+@router.get("/outlets")
+async def list_outlets(
+    active_only: bool = False,
+    exclude_warehouse: bool = False,
+    with_stats: bool = False,
+    user: dict = Depends(get_business_scope),
+):
+    db = get_db()
+    f = _outlet_list_filter(user, active_only, exclude_warehouse)
     docs = await db.outlets.find(f).to_list(1000)
-    return [clean_doc(d) for d in docs]
+    docs.sort(key=lambda d: (not d.get("is_warehouse"), d.get("name", "")))
+    results = []
+    for d in docs:
+        row = clean_doc(d)
+        row.setdefault("is_warehouse", False)
+        row.setdefault("active", True)
+        if with_stats and user.get("role") == "business_admin":
+            row.update(await compute_outlet_stats_30d(db, user["business_id"], row["id"]))
+        results.append(row)
+    return results
+
+
+@router.post("/outlets/ensure-warehouse")
+async def ensure_warehouse(
+    user: dict = Depends(require_permission_or_roles("outlets.manage", "business_admin")),
+):
+    """Create a central warehouse outlet if the business does not have one yet."""
+    db = get_db()
+    existing = await get_business_warehouse(db, user["business_id"])
+    if existing:
+        return clean_doc(existing)
+    biz = await db.businesses.find_one({"_id": ObjectId(user["business_id"])})
+    doc = {
+        "name": "Central Warehouse",
+        "address": biz.get("address") or "Main storage facility",
+        "phone": biz.get("phone") or "",
+        "manager_id": None,
+        "business_id": user["business_id"],
+        "is_warehouse": True,
+        "active": True,
+        "created_at": utcnow_iso(),
+        "updated_at": utcnow_iso(),
+    }
+    res = await db.outlets.insert_one(doc)
+    await audit_log(user, "create", "outlet", str(res.inserted_id), {"is_warehouse": True})
+    return clean_doc({**doc, "_id": res.inserted_id})
 
 
 @router.post("/outlets")
 async def create_outlet(
     payload: OutletCreate,
-    user: dict = Depends(require_roles("business_admin")),
+    user: dict = Depends(require_permission_or_roles("outlets.manage", "business_admin")),
 ):
     db = get_db()
     biz = await db.businesses.find_one({"_id": ObjectId(user["business_id"])})
     if biz.get("subscription_status") != "approved":
         raise HTTPException(403, "Subscription not approved")
-    current = await db.outlets.count_documents({"business_id": user["business_id"]})
-    if current >= biz.get("outlet_limit", 1):
-        raise HTTPException(400, f"Outlet limit reached ({biz['outlet_limit']}). Upgrade plan.")
+    is_warehouse = payload.is_warehouse
+    if is_warehouse:
+        existing_wh = await get_business_warehouse(db, user["business_id"])
+        if existing_wh:
+            raise HTTPException(400, "A central warehouse already exists for this business")
+    if not is_warehouse:
+        current = await db.outlets.count_documents({
+            "business_id": user["business_id"],
+            "is_warehouse": {"$ne": True},
+        })
+        if current >= biz.get("outlet_limit", 1):
+            raise HTTPException(400, f"Outlet limit reached ({biz['outlet_limit']}). Upgrade plan.")
     doc = payload.model_dump()
     doc["business_id"] = user["business_id"]
     doc["active"] = True
@@ -338,7 +433,7 @@ async def create_outlet(
 async def update_outlet(
     outlet_id: str,
     payload: OutletUpdate,
-    user: dict = Depends(require_roles("business_admin")),
+    user: dict = Depends(require_permission_or_roles("outlets.manage", "business_admin")),
 ):
     db = get_db()
     update = {k: v for k, v in payload.model_dump().items() if v is not None}
@@ -354,7 +449,7 @@ async def update_outlet(
 @router.delete("/outlets/{outlet_id}")
 async def delete_outlet(
     outlet_id: str,
-    user: dict = Depends(require_roles("business_admin")),
+    user: dict = Depends(require_permission_or_roles("outlets.manage", "business_admin")),
 ):
     db = get_db()
     await db.outlets.delete_one({"_id": ObjectId(outlet_id), "business_id": user["business_id"]})
@@ -364,7 +459,7 @@ async def delete_outlet(
 
 # ============ USERS / STAFF ============
 @router.get("/users")
-async def list_users(user: dict = Depends(require_roles("business_admin", "platform_admin"))):
+async def list_users(user: dict = Depends(require_permission_or_roles("employees.view", "business_admin", "platform_admin"))):
     db = get_db()
     f = _scope_filter(user)
     docs = await db.users.find(f, {"password_hash": 0}).to_list(1000)
@@ -376,20 +471,34 @@ async def create_user(
     payload: UserCreate,
     user: dict = Depends(require_roles("business_admin")),
 ):
+    """Legacy staff create — owner direct hire with role slug."""
     db = get_db()
+    await migrate_business_users(db, user["business_id"])
     existing = await db.users.find_one({"email": payload.email.lower()})
     if existing:
         raise HTTPException(400, "Email already exists")
     if payload.role == UserRole.PLATFORM_ADMIN:
         raise HTTPException(403, "Cannot create platform admin")
+    role_id = None
+    role_doc = await db.business_roles.find_one({
+        "business_id": user["business_id"],
+        "slug": payload.role.value,
+    })
+    if role_doc:
+        role_id = str(role_doc["_id"])
     doc = {
         "name": payload.name,
         "email": payload.email.lower(),
         "phone": payload.phone,
         "password_hash": hash_password(payload.password),
         "role": payload.role.value,
+        "role_id": role_id,
         "business_id": user["business_id"],
         "outlet_id": payload.outlet_id,
+        "outlet_ids": [payload.outlet_id] if payload.outlet_id else [],
+        "reports_to_user_id": user["id"],
+        "hired_by": user["id"],
+        "employee_status": "active",
         "active": True,
         "created_at": utcnow_iso(),
         "updated_at": utcnow_iso(),

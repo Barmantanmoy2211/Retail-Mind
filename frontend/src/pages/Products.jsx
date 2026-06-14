@@ -16,7 +16,7 @@ import ImageUpload from "@/components/ImageUpload";
 const empty = {
   name: "", sku: "", barcode: "", category: "", cost_price: "", selling_price: "",
   tax_percent: "", reward_points: "0", min_stock: "10", unit: "pcs", image_url: "",
-  outlet_ids: [], initial_stock: "0",
+  outlet_ids: [], supplier_ids: [], initial_stock: "0",
 };
 
 export default function Products() {
@@ -28,6 +28,8 @@ export default function Products() {
 
   const [items, setItems] = useState([]);
   const [outlets, setOutlets] = useState([]);
+  const [suppliers, setSuppliers] = useState([]);
+  const [costBreakdown, setCostBreakdown] = useState(null);
   const [q, setQ] = useState("");
   const [showDialog, setShowDialog] = useState(false);
   const [showOutletDialog, setShowOutletDialog] = useState(false);
@@ -38,12 +40,14 @@ export default function Products() {
 
   const load = async () => {
     const query = q ? `?search=${q}` : "";
-    const [p, o] = await Promise.all([
+    const [p, o, s] = await Promise.all([
       api.get(`/products${query}`),
       api.get("/outlets"),
+      api.get("/suppliers"),
     ]);
     setItems(p.data);
     setOutlets(o.data);
+    setSuppliers(s.data);
   };
   useEffect(() => { load(); }, [q]);
 
@@ -62,15 +66,24 @@ export default function Products() {
     setShowDialog(true);
   };
 
-  const openEdit = (p) => {
+  const openEdit = async (p) => {
     setEditing(p);
     setForm({
       name: p.name || "", sku: p.sku || "", barcode: p.barcode || "",
-      category: p.category || "", cost_price: p.cost_price || "",
+      category: p.category || "", cost_price: p.computed_cost_price || p.cost_price || "",
       selling_price: p.selling_price || "", tax_percent: p.tax_percent || "",
       reward_points: p.reward_points || 0, min_stock: p.min_stock || 0, unit: p.unit || "pcs",
-      image_url: p.image_url || "", outlet_ids: p.outlet_ids || [], initial_stock: "0",
+      image_url: p.image_url || "", outlet_ids: p.outlet_ids || [],
+      supplier_ids: p.supplier_ids || [], initial_stock: "0",
     });
+    setCostBreakdown(null);
+    if (isAdmin) {
+      try {
+        const { data } = await api.get(`/products/${p.id}/cost-breakdown`);
+        setCostBreakdown(data);
+        if (data.average_cost) setForm((f) => ({ ...f, cost_price: data.average_cost }));
+      } catch { /* ignore */ }
+    }
     setShowDialog(true);
   };
 
@@ -87,6 +100,15 @@ export default function Products() {
     setIds(ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]);
   };
 
+  const toggleSupplier = (id) => {
+    setForm((f) => ({
+      ...f,
+      supplier_ids: f.supplier_ids.includes(id)
+        ? f.supplier_ids.filter((x) => x !== id)
+        : [...f.supplier_ids, id],
+    }));
+  };
+
   const selectAllOutlets = (setIds) => setIds(outlets.map((o) => o.id));
 
   const save = async () => {
@@ -100,7 +122,12 @@ export default function Products() {
         min_stock: Number(form.min_stock) || 0,
         initial_stock: Number(form.initial_stock) || 0,
         outlet_ids: isAdmin ? form.outlet_ids : undefined,
+        supplier_ids: isAdmin ? form.supplier_ids : undefined,
       };
+      if (isAdmin && (!form.supplier_ids || form.supplier_ids.length < 1)) {
+        toast.error("Select at least one supplier");
+        return;
+      }
       if (editing) {
         await api.put(`/products/${editing.id}`, payload);
         toast.success("Product updated");
@@ -137,10 +164,11 @@ export default function Products() {
   };
 
   const outletLabel = (p) => {
-    const ids = p.outlet_ids || [];
-    if (!ids.length) return "All outlets";
-    if (ids.length === outlets.length) return "All outlets";
-    return ids.map((id) => outlets.find((o) => o.id === id)?.name || id).join(", ");
+    if (p.all_outlets || !(p.outlet_ids?.length)) return "All outlets";
+    if (p.outlet_names?.length) return p.outlet_names.join(", ");
+    return (p.outlet_ids || [])
+      .map((id) => outlets.find((o) => o.id === id)?.name || id)
+      .join(", ");
   };
 
   const canEditProduct = (p) => {
@@ -260,7 +288,44 @@ export default function Products() {
             <div><Label>Barcode</Label><Input value={form.barcode} onChange={(e) => setForm({ ...form, barcode: e.target.value })} data-testid="prod-barcode" /></div>
             <div><Label>Category</Label><Input value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} data-testid="prod-cat" /></div>
             <div><Label>Unit</Label><Input value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} /></div>
-            <div><Label>Cost Price *</Label><Input type="number" value={form.cost_price} onChange={(e) => setForm({ ...form, cost_price: e.target.value })} data-testid="prod-cost" /></div>
+            {isAdmin && (
+              <div className="col-span-2">
+                <div className="flex items-center justify-between mb-2">
+                  <Label>Suppliers * (at least one)</Label>
+                </div>
+                <div className="grid grid-cols-2 gap-2 border border-border rounded-lg p-3 max-h-32 overflow-y-auto">
+                  {suppliers.length === 0 ? (
+                    <p className="text-sm text-muted-foreground col-span-2">Add suppliers first under Suppliers menu.</p>
+                  ) : suppliers.map((s) => (
+                    <label key={s.id} className="flex items-center gap-2 text-sm cursor-pointer">
+                      <Checkbox
+                        checked={form.supplier_ids.includes(s.id)}
+                        onCheckedChange={() => toggleSupplier(s.id)}
+                      />
+                      {s.name}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div>
+              <Label>Cost Price {costBreakdown?.cost_source === "po_average" ? "(avg from POs)" : "*"}</Label>
+              <Input
+                type="number"
+                value={form.cost_price}
+                onChange={(e) => setForm({ ...form, cost_price: e.target.value })}
+                readOnly={!!costBreakdown?.supplier_prices?.length}
+                data-testid="prod-cost"
+              />
+              {costBreakdown?.supplier_prices?.length > 0 && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  Avg of supplier PO prices: {costBreakdown.supplier_prices.map((s) => `${s.supplier_name} ₹${s.unit_cost}`).join(" · ")}
+                </p>
+              )}
+              {!costBreakdown?.supplier_prices?.length && isAdmin && (
+                <p className="text-xs text-muted-foreground mt-1">Updates automatically when purchase orders are received.</p>
+              )}
+            </div>
             <div><Label>Selling Price *</Label><Input type="number" value={form.selling_price} onChange={(e) => setForm({ ...form, selling_price: e.target.value })} data-testid="prod-price" /></div>
             <div><Label>Tax %</Label><Input type="number" value={form.tax_percent} onChange={(e) => setForm({ ...form, tax_percent: e.target.value })} data-testid="prod-tax" /></div>
             <div><Label>Reward Points</Label><Input type="number" value={form.reward_points} onChange={(e) => setForm({ ...form, reward_points: e.target.value })} /></div>

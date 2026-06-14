@@ -80,3 +80,17 @@ async def get_business_scope(user: dict = Depends(get_current_user)) -> dict:
     if not user.get("business_id"):
         raise HTTPException(status_code=403, detail="No business assigned")
     return user
+
+
+def require_permission_or_roles(permission: str, *legacy_roles: str):
+    """Permission engine with legacy role fallback during migration."""
+    from permissions import get_user_permissions, has_permission, enrich_user_context
+
+    async def dep(user: dict = Depends(get_current_user)) -> dict:
+        perms = await get_user_permissions(user)
+        if has_permission(user, perms, permission):
+            return await enrich_user_context(user)
+        if legacy_roles and user.get("role") in legacy_roles:
+            return user
+        raise HTTPException(status_code=403, detail=f"Requires permission: {permission}")
+    return dep

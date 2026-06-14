@@ -15,11 +15,13 @@ from routes_core import router as core_router
 from routes_business import router as biz_router
 from routes_dashboard import router as dash_router
 from routes_extras import router as extras_router
+from routes_org import router as org_router
 
 app.include_router(core_router)
 app.include_router(biz_router)
 app.include_router(dash_router)
 app.include_router(extras_router)
+app.include_router(org_router)
 
 
 @app.get("/api/health")

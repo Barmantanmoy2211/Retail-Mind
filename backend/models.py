@@ -78,6 +78,10 @@ class UserUpdate(BaseModel):
     role: Optional[UserRole] = None
     outlet_id: Optional[str] = None
     active: Optional[bool] = None
+    role_id: Optional[str] = None
+    reports_to_user_id: Optional[str] = None
+    outlet_ids: Optional[List[str]] = None
+    employee_status: Optional[str] = None
 
 
 # === BUSINESS ===
@@ -97,6 +101,7 @@ class OutletCreate(BaseModel):
     address: str
     phone: Optional[str] = None
     manager_id: Optional[str] = None
+    is_warehouse: bool = False
 
 
 class OutletUpdate(BaseModel):
@@ -105,15 +110,21 @@ class OutletUpdate(BaseModel):
     phone: Optional[str] = None
     manager_id: Optional[str] = None
     active: Optional[bool] = None
+    is_warehouse: Optional[bool] = None
 
 
 # === PRODUCT ===
+class ProductSupplierLink(BaseModel):
+    supplier_id: str
+
+
 class ProductCreate(BaseModel):
     name: str
     sku: str
     barcode: Optional[str] = None
     category: Optional[str] = None
     subcategory: Optional[str] = None
+    supplier_ids: List[str] = []
     cost_price: float = 0.0
     selling_price: float
     tax_percent: float = 0.0
@@ -132,6 +143,7 @@ class ProductUpdate(BaseModel):
     barcode: Optional[str] = None
     category: Optional[str] = None
     subcategory: Optional[str] = None
+    supplier_ids: Optional[List[str]] = None
     cost_price: Optional[float] = None
     selling_price: Optional[float] = None
     tax_percent: Optional[float] = None
@@ -157,6 +169,8 @@ class InventoryTxnCreate(BaseModel):
     quantity: int
     note: Optional[str] = None
     to_outlet_id: Optional[str] = None  # for transfer
+    supplier_id: Optional[str] = None  # owner stock-in → auto PO
+    cost_price: Optional[float] = None  # unit cost for owner stock-in PO
 
 
 # === CUSTOMER ===
@@ -165,6 +179,8 @@ class CustomerCreate(BaseModel):
     phone: str
     email: Optional[EmailStr] = None
     address: Optional[str] = None
+    location: Optional[str] = None
+    outlet_id: Optional[str] = None
     dob: Optional[str] = None
 
 
@@ -173,6 +189,7 @@ class CustomerUpdate(BaseModel):
     phone: Optional[str] = None
     email: Optional[EmailStr] = None
     address: Optional[str] = None
+    location: Optional[str] = None
     dob: Optional[str] = None
 
 
@@ -225,8 +242,28 @@ class PurchaseOrderCreate(BaseModel):
     note: Optional[str] = None
 
 
+class StockRequestItemCreate(BaseModel):
+    product_id: str
+    quantity: int
+
+
+class StockRequestCreate(BaseModel):
+    items: List[StockRequestItemCreate]
+    note: Optional[str] = None
+
+
+class PurchaseOrderApprove(BaseModel):
+    fulfillment_source: str = "supplier"  # supplier | warehouse
+    supplier_id: Optional[str] = None
+    fulfill_outlet_id: str
+    warehouse_id: Optional[str] = None
+    shipping_charge: float = 0
+    center_charge: float = 0
+    items: List[POItemCreate]
+
+
 class PurchaseOrderUpdate(BaseModel):
-    status: str  # pending, received, cancelled
+    status: str  # pending, received, cancelled, rejected
 
 
 # === EXPENSE ===
@@ -238,6 +275,7 @@ class ExpenseCreate(BaseModel):
     description: str
     expense_date: Optional[str] = None
     attachment_url: Optional[str] = None
+    employee_id: Optional[str] = None
 
 
 class ExpenseApprove(BaseModel):
@@ -278,3 +316,136 @@ class SubscriptionActionRequest(BaseModel):
 class CategoryCreate(BaseModel):
     name: str
     parent: Optional[str] = None
+
+
+# === ORGANIZATION / ROLES ===
+class RoleScope(str, Enum):
+    OUTLET = "outlet"
+    MULTI_OUTLET = "multi_outlet"
+    ALL_OUTLETS = "all_outlets"
+
+
+class RequestStatus(str, Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
+class WorkflowTrigger(str, Enum):
+    HIRING = "hiring"
+    ROLE_CREATE = "role_create"
+    EXPENSE = "expense"
+    TRANSFER = "transfer"
+    INVENTORY_ADJUST = "inventory_adjust"
+
+
+class BusinessRoleCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+    parent_role_id: Optional[str] = None
+    scope: RoleScope = RoleScope.OUTLET
+    outlet_ids: Optional[List[str]] = None
+    permissions: List[str] = []
+    can_create_employees: bool = False
+    is_active: bool = True
+
+
+class BusinessRoleUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    parent_role_id: Optional[str] = None
+    scope: Optional[RoleScope] = None
+    outlet_ids: Optional[List[str]] = None
+    permissions: Optional[List[str]] = None
+    can_create_employees: Optional[bool] = None
+    is_active: Optional[bool] = None
+
+
+class ApprovalLevel(BaseModel):
+    type: str  # role | system_role
+    role_id: Optional[str] = None
+    system_role: Optional[str] = None
+
+
+class ApprovalWorkflowCreate(BaseModel):
+    name: str
+    trigger_type: WorkflowTrigger
+    approval_levels: List[ApprovalLevel]
+    is_active: bool = True
+
+
+class ApprovalWorkflowUpdate(BaseModel):
+    name: Optional[str] = None
+    approval_levels: Optional[List[ApprovalLevel]] = None
+    is_active: Optional[bool] = None
+
+
+class HiringCandidate(BaseModel):
+    name: str
+    email: EmailStr
+    phone: Optional[str] = None
+    password: Optional[str] = None
+
+
+class HiringRequestCreate(BaseModel):
+    requested_role_id: str
+    outlet_id: str
+    candidate: HiringCandidate
+    reason: Optional[str] = None
+    reports_to_user_id: Optional[str] = None
+
+
+class RoleRequestCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+    parent_role_id: Optional[str] = None
+    scope: RoleScope = RoleScope.OUTLET
+    outlet_ids: Optional[List[str]] = None
+    permissions: List[str] = []
+    can_create_employees: bool = False
+    reason: Optional[str] = None
+
+
+class ApprovalActionRequest(BaseModel):
+    request_type: str  # hiring | role_create | expense | transfer
+    request_id: str
+    action: str  # approve | reject
+    comments: Optional[str] = None
+
+
+class TransferRequestCreate(BaseModel):
+    user_id: str
+    to_outlet_ids: List[str]
+    to_role_id: Optional[str] = None
+    reason: Optional[str] = None
+    temporary_until: Optional[str] = None
+
+
+class PermissionMatrixUpdate(BaseModel):
+    permissions: List[str]
+
+
+class DirectEmployeeCreate(BaseModel):
+    name: str
+    email: EmailStr
+    phone: Optional[str] = None
+    password: str
+    role_id: str
+    outlet_ids: List[str] = []
+    reports_to_user_id: Optional[str] = None
+    date_of_joining: Optional[str] = None
+    base_salary: Optional[float] = None
+
+
+class EmployeeUpdate(BaseModel):
+    name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = None
+    password: Optional[str] = None
+    role_id: Optional[str] = None
+    outlet_ids: Optional[List[str]] = None
+    reports_to_user_id: Optional[str] = None
+    active: Optional[bool] = None
+    employee_status: Optional[str] = None
+    date_of_joining: Optional[str] = None
+    base_salary: Optional[float] = None

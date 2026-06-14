@@ -584,3 +584,49 @@ class TestUploads:
         r = session.post(f"{API}/uploads/image")
         assert r.status_code == 401
 
+
+# ---------- Organization / Permissions ----------
+class TestOrganization:
+    def test_auth_me_includes_permissions(self, tokens):
+        c = _client(tokens["business_admin"]["access_token"])
+        r = c.get(f"{API}/auth/me")
+        assert r.status_code == 200
+        body = r.json()
+        assert "permissions" in body
+        assert "*" in body["permissions"] or len(body["permissions"]) > 0
+
+    def test_permissions_catalog(self, tokens):
+        c = _client(tokens["business_admin"]["access_token"])
+        r = c.get(f"{API}/org/permissions/catalog")
+        assert r.status_code == 200
+        assert "organization" in r.json()
+
+    def test_list_roles_owner(self, tokens):
+        c = _client(tokens["business_admin"]["access_token"])
+        r = c.get(f"{API}/org/roles")
+        assert r.status_code == 200
+        assert isinstance(r.json(), list)
+
+    def test_cashier_cannot_create_roles(self, tokens):
+        c = _client(tokens["cashier"]["access_token"])
+        r = c.post(f"{API}/org/roles", json={
+            "name": "Test Role",
+            "permissions": ["bills.create"],
+            "scope": "outlet",
+        })
+        assert r.status_code == 403
+
+    def test_org_chart(self, tokens):
+        c = _client(tokens["business_admin"]["access_token"])
+        r = c.get(f"{API}/org/chart")
+        assert r.status_code == 200
+        body = r.json()
+        assert "employee_tree" in body
+        assert "role_tree" in body
+
+    def test_pending_approvals_endpoint(self, tokens):
+        c = _client(tokens["business_admin"]["access_token"])
+        r = c.get(f"{API}/org/approvals/pending")
+        assert r.status_code == 200
+        assert isinstance(r.json(), list)
+

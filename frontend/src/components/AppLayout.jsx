@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
+import { ROUTE_PERMISSIONS } from "@/lib/permissions";
+import NotificationBell from "@/components/NotificationBell";
 import { useTheme } from "@/contexts/ThemeContext";
 import { Button } from "@/components/ui/button";
 import {
   LayoutDashboard, Store, Package, Users, ShoppingCart, FileText,
   TrendingUp, Settings, LogOut, Moon, Sun, ChevronLeft, ChevronRight,
   Truck, Receipt, Award, Wallet, Building2, ScrollText, Boxes, Tag,
-  ShieldCheck, Bell, Menu, X, Sparkles, Search, Command as CmdIcon,
+  ShieldCheck, Menu, X, Sparkles, Search, Command as CmdIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -36,7 +38,7 @@ const businessNav = [
   { to: "/rewards", label: "Loyalty Rewards", icon: Award },
   { to: "/taxes", label: "Tax Setup", icon: Tag },
   { to: "/outlets", label: "Outlets", icon: Store },
-  { to: "/staff", label: "Staff & Roles", icon: Users },
+  { to: "/organization", label: "Organization", icon: Users, perms: ["employees.view", "roles.view"] },
   { to: "/reports", label: "Reports", icon: TrendingUp },
   { to: "/health-score", label: "Health Score", icon: Sparkles },
   { to: "/audit", label: "Audit Logs", icon: ScrollText },
@@ -61,7 +63,7 @@ const cashierNav = [
 ];
 
 export default function AppLayout({ children }) {
-  const { user, business, outlet, logout } = useAuth();
+  const { user, business, outlet, logout, businessRole, canAny } = useAuth();
   const { theme, toggle } = useTheme();
   const location = useLocation();
   const navigate = useNavigate();
@@ -80,15 +82,24 @@ export default function AppLayout({ children }) {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const nav =
+  const filterNav = (items) => items.filter((item) => {
+    if (user?.role === "business_admin") return true;
+    const perms = item.perms || ROUTE_PERMISSIONS[item.to];
+    if (!perms) return true;
+    return canAny(...perms);
+  });
+
+  const nav = filterNav(
     user?.role === "platform_admin" ? platformNav :
     user?.role === "business_admin" ? businessNav :
-    user?.role === "outlet_manager" ? outletNav : cashierNav;
+    user?.role === "outlet_manager" ? [...outletNav, { to: "/organization", label: "Organization", icon: Users, perms: ["employees.view"] }] :
+    cashierNav,
+  );
 
   const initials = (user?.name || "U")
     .split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase();
 
-  const roleLabel = {
+  const roleLabel = businessRole?.name || {
     platform_admin: "Platform Admin",
     business_admin: "Business Owner",
     outlet_manager: "Outlet Manager",
@@ -203,6 +214,7 @@ export default function AppLayout({ children }) {
               <span className="text-xs">Search...</span>
               <kbd className="ml-1 text-[10px] font-mono px-1.5 py-0.5 bg-background border border-border rounded">⌘K</kbd>
             </button>
+            {user?.role !== "platform_admin" && <NotificationBell />}
             <button
               onClick={toggle}
               data-testid="theme-toggle"
